@@ -152,6 +152,10 @@ $$\text{Lateral Range} = \sqrt{\sum_{i=1}^{25} p_i \,(\text{col}_i - \text{Later
 """,
 }
 
+KPI_DEFINITIONS_MARKDOWN = "\n\n---\n\n".join(
+    [f"### {kpi}\n\n{KPI_DESCRIPTIONS[kpi].strip()}" for kpi in KPI_COLUMNS]
+)
+
 # ── sidebar filter ───────────────────────────────────────────────────────
 with sidebar_container:
     position_type = st.radio(
@@ -194,32 +198,33 @@ for kpi in KPI_COLUMNS:
 
 # All rows for the selected player (one per match)
 player_df = df[df["player_name"] == selected_player]
-player_positions = sorted(player_df[pos_col].unique())
+player_positions = player_df[pos_col].value_counts().index.tolist()
 player_team = player_df.iloc[0]["team_name"]
 
 # Only keep positions the selected player has appeared in
 positions = player_positions
 df_filtered = df[df[pos_col].isin(positions)]
 
-# ── One distribution plot per KPI ────────────────────────────────────────
-for kpi in KPI_COLUMNS:
-    z_col = f"{kpi}_z"
+# ── KPI definitions in one clean dropdown ────────────────────────────────
+with st.expander("KPI definitions", expanded=False):
+    st.markdown(KPI_DEFINITIONS_MARKDOWN)
 
-    st.expander(f"What is {kpi}?", expanded=False).markdown(KPI_DESCRIPTIONS[kpi])
-
+# ── One distribution plot per position (all KPIs in each figure) ─────────
+for pos in positions:
     fig_pos = go.Figure()
+    df_pos = df[df[pos_col] == pos]
 
-    # Aggregate to one dot per player per position (mean z-score)
-    df_agg = df_filtered.groupby(["player_name", pos_col], as_index=False)[z_col].mean()
+    # Aggregate to one dot per player (mean z-score within this position)
+    df_agg = df_pos.groupby("player_name", as_index=False)[[f"{k}_z" for k in KPI_COLUMNS]].mean()
 
-    # All players per position row
+    # Other players by KPI row
     showlegend_group = True
-    for i, pos in enumerate(positions):
-        pos_df = df_agg[df_agg[pos_col] == pos]
+    for i, kpi in enumerate(KPI_COLUMNS):
+        z_col = f"{kpi}_z"
         fig_pos.add_trace(
             go.Scatter(
-                x=pos_df[z_col].tolist(),
-                y=[i] * len(pos_df),
+                x=df_agg[z_col].tolist(),
+                y=[i] * len(df_agg),
                 mode="markers",
                 marker=dict(
                     color=BRIGHT_GREEN.format(a=0.2),
@@ -227,7 +232,7 @@ for kpi in KPI_COLUMNS:
                     line_width=1.5,
                     line_color=BRIGHT_GREEN.format(a=1),
                 ),
-                text=pos_df["player_name"],
+                text=df_agg["player_name"],
                 hovertemplate="%{text}<br>" + kpi + " z: %{x:.2f}<extra></extra>",
                 name="Other players  ",
                 showlegend=showlegend_group,
@@ -235,17 +240,16 @@ for kpi in KPI_COLUMNS:
         )
         showlegend_group = False
 
-    # Selected player markers – one per position
-    player_agg = player_df.groupby(pos_col, as_index=False)[z_col].mean()
+    # Selected player marker per KPI
+    player_pos_df = player_df[player_df[pos_col] == pos]
+    player_agg = player_pos_df[[f"{k}_z" for k in KPI_COLUMNS]].mean()
     showlegend_player = True
-    for i, pos in enumerate(positions):
-        row = player_agg[player_agg[pos_col] == pos]
-        if row.empty:
-            continue
+    for i, kpi in enumerate(KPI_COLUMNS):
+        z_col = f"{kpi}_z"
         fig_pos.add_trace(
             go.Scatter(
-                x=row[z_col].tolist(),
-                y=[i] * len(row),
+                x=[player_agg[z_col]],
+                y=[i],
                 mode="markers",
                 marker=dict(
                     color=WHITE.format(a=0.5),
@@ -254,7 +258,7 @@ for kpi in KPI_COLUMNS:
                     line_width=1.5,
                     line_color=WHITE.format(a=1),
                 ),
-                text=[selected_player] * len(row),
+                text=[selected_player],
                 hovertemplate="%{text}<br>" + kpi + " z: %{x:.2f}<extra></extra>",
                 name=selected_player,
                 showlegend=showlegend_player,
@@ -262,38 +266,37 @@ for kpi in KPI_COLUMNS:
         )
         showlegend_player = False
 
-    _base_layout(fig_pos, height=max(300, len(positions) * 55))
-    _add_title(fig_pos, f"{kpi} (z-score) by position – {selected_player}",
-               f"{player_team} · Positions played: {', '.join(positions)}")
+    _base_layout(fig_pos, height=max(360, len(KPI_COLUMNS) * 70))
 
-    all_z = df_filtered[z_col].dropna()
+    n_matches = len(player_pos_df)
+    suffix = "match" if n_matches == 1 else "matches"
+    _add_title(
+        fig_pos,
+        f"{selected_player} at {pos} – KPI distribution (z-scores)",
+        f"{player_team} · {n_matches} {suffix} in this position",
+    )
+
+    all_z = df_pos[[f"{k}_z" for k in KPI_COLUMNS]].stack().dropna()
     x_min = all_z.min() - 0.5
     x_max = all_z.max() + 0.5
-    left_label, right_label = KPI_AXIS_LABELS[kpi]
     fig_pos.update_xaxes(
         range=[x_min, x_max],
         fixedrange=True,
         title=dict(
-            text=f"{left_label}     ·     z-score     ·     {right_label}",
+            text="Lower relative to position peers     ·     z-score     ·     Higher relative to position peers",
             font=dict(color=WHITE.format(a=0.6), family=FONT_BODY, size=11),
         ),
     )
-    position_labels = []
-    for pos in positions:
-        n_matches = len(player_df[player_df[pos_col] == pos])
-        suffix = "match" if n_matches == 1 else "matches"
-        position_labels.append(f"{pos} ({n_matches} {suffix})")
-
     fig_pos.update_yaxes(
         tickmode="array",
-        tickvals=list(range(len(positions))),
-        ticktext=position_labels,
+        tickvals=list(range(len(KPI_COLUMNS))),
+        ticktext=KPI_COLUMNS,
         fixedrange=True,
         gridcolor=MEDIUM_GREEN,
         zerolinecolor=MEDIUM_GREEN,
     )
     fig_pos.add_shape(
-        type="line", x0=0, y0=-0.5, x1=0, y1=len(positions) - 0.5,
+        type="line", x0=0, y0=-0.5, x1=0, y1=len(KPI_COLUMNS) - 0.5,
         line=dict(color="gray", width=1, dash="dot"),
     )
 
