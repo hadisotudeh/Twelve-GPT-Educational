@@ -16,3 +16,5 @@ user_info.json
 clustering.ipynb
 venv/
 data/
+.devcontainer/
+.github

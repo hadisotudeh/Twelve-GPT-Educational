@@ -710,3 +710,144 @@ class PersonDescription(Description):
             "Finally, summarise exactly how the person compares to others in the same position. "
         )
         return [{"role": "user", "content": prompt}]
+
+
+class PositionVersatilityDescription(Description):
+    """
+    Generates natural language descriptions of player position versatility KPIs.
+    Includes position-specific analysis with match counts and role-specific performance.
+    """
+
+    output_token_limit = 150
+
+    @property
+    def gpt_examples_path(self):
+        return f"{self.gpt_examples_base}/PositionVersatility.xlsx"
+
+    @property
+    def describe_paths(self):
+        return [f"{self.describe_base}/PositionVersatility.xlsx"]
+
+    def __init__(self, player_df, positions, player_name, player_team, stats):
+        self.player_df = player_df
+        self.positions = positions
+        self.player_name = player_name
+        self.player_team = player_team
+        self.stats = stats
+        super().__init__()
+
+    def get_intro_messages(self) -> List[Dict[str, str]]:
+        """
+        Introduction messages for position versatility analysis.
+        """
+        intro = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a football position analyst. "
+                    "You provide clear, data-driven explanations about how players position themselves on the pitch. "
+                    "You analyze each position a player plays separately, noting the number of matches in each role. "
+                    "You use positional versatility metrics and z-scores to explain how players perform in each specific role and compare to peers. "
+                    "You focus on tactical implications, role-specific performance, and playing style based on positioning data."
+                ),
+            },
+        ]
+        if len(self.describe_paths) > 0:
+            intro += [
+                {
+                    "role": "user",
+                    "content": "First, could you answer some questions about positional versatility and position-specific analysis?",
+                },
+                {"role": "assistant", "content": "Sure!"},
+            ]
+
+        return intro
+
+    def synthesize_text(self):
+        """
+        Convert KPI z-scores to natural language description, broken down by position.
+        Generates flowing narrative text rather than bullet points.
+        """
+        kpi_columns = self.stats.kpi_columns
+        pos_col = self.stats.pos_col
+
+        description = f"Here is a statistical description of {self.player_name}, who played for {self.player_team}. "
+        description += f"\n\n"
+
+        # Analyze each position separately
+        for position in self.positions:
+            # Get data for this specific position
+            position_player_df = self.player_df[self.player_df[pos_col] == position]
+            n_matches = len(position_player_df)
+            match_suffix = "match" if n_matches == 1 else "matches"
+            
+            # Get z-scores for this position
+            position_z_data = position_player_df[
+                [f"{k}_z" for k in kpi_columns]
+            ].mean()
+
+            # Build position-specific narrative description
+            position_narratives = []
+
+            # Versatility
+            z_versatility = position_z_data["Versatility_z"]
+            if z_versatility > 0.5:
+                position_narratives.append("showed above-average versatility across the pitch")
+            elif z_versatility < -0.5:
+                position_narratives.append("operated with notable positional specialization")
+            else:
+                position_narratives.append("displayed typical versatility for the role")
+
+            # Vertical Center of Gravity
+            z_vcog = position_z_data["Vertical Center of Gravity_z"]
+            if z_vcog > 0.5:
+                position_narratives.append("took an attacking position higher up the pitch")
+            elif z_vcog < -0.5:
+                position_narratives.append("maintained a deeper, more defensive depth")
+            else:
+                position_narratives.append("held typical positioning depth")
+
+            # Lateral positioning
+            z_lcog = position_z_data["Lateral Center of Gravity_z"]
+            if z_lcog > 1:
+                position_narratives.append("positioned heavily on the right flank")
+            elif z_lcog > 0.3:
+                position_narratives.append("favored the right side")
+            elif z_lcog < -1:
+                position_narratives.append("positioned heavily on the left flank")
+            elif z_lcog < -0.3:
+                position_narratives.append("favored the left side")
+            else:
+                position_narratives.append("maintained central positioning")
+
+            # Vertical Range
+            z_vrange = position_z_data["Vertical Range_z"]
+            if z_vrange > 0.5:
+                position_narratives.append("covered significant ground vertically")
+            elif z_vrange < -0.5:
+                position_narratives.append("operated within a narrow vertical band")
+
+            # Lateral Range
+            z_lrange = position_z_data["Lateral Range_z"]
+            if z_lrange > 0.5:
+                position_narratives.append("ranged widely across the pitch width")
+            elif z_lrange < -0.5:
+                position_narratives.append("stayed concentrated in a narrow area")
+
+            # Combine narratives into cohesive text
+            position_text = f"**{position}** ({n_matches} {match_suffix}): In this role, {self.player_name} " + ", ".join(position_narratives).lower() + ". "
+            description += position_text + "\n"
+
+        return description
+
+    def get_prompt_messages(self):
+        """
+        Task instructions for the LLM, emphasizing position-specific analysis.
+        """
+        prompt = (
+            f"Please use the statistical description enclosed with ``` to provide a brief summary "
+            f"of {self.player_name}'s positional versatility in exactly 5 sentences maximum. "
+            f"Write in flowing narrative text without bullet points. For each position, briefly explain how his KPI profile compared to peers "
+            f"and highlight tactical implications. Conclude with an overall assessment of his positional flexibility."
+        )
+        return [{"role": "user", "content": prompt}]

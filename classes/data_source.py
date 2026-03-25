@@ -576,3 +576,54 @@ class PersonStat(Stats):
         ser_metrics = self.df.squeeze()
 
         return self.data_point_class(id=id, name=name, ser_metrics=ser_metrics)
+
+
+class PositionVersatilityStats(Data):
+    """
+    Loads and manages player versatility data from position_maps/player_versatility.csv.
+    Computes z-scores for KPIs within position groups.
+    """
+
+    def __init__(self):
+        self.kpi_columns = [
+            "Versatility",
+            "Vertical Center of Gravity",
+            "Lateral Center of Gravity",
+            "Vertical Range",
+            "Lateral Range",
+        ]
+        self.pos_col = "skillcorner_position"
+        super().__init__()
+        self._compute_z_scores()
+
+    def get_raw_data(self) -> pd.DataFrame:
+        """Load raw player versatility data."""
+        return pd.read_csv("data/position_maps/player_versatility.csv")
+
+    def process_data(self, df_raw: pd.DataFrame) -> pd.DataFrame:
+        """Minimal processing - data is already clean."""
+        return df_raw
+
+    def _compute_z_scores(self):
+        """Compute z-scores for each KPI within position groups."""
+        for kpi in self.kpi_columns:
+            group_mean = self.df.groupby(self.pos_col)[kpi].transform("mean")
+            group_std = self.df.groupby(self.pos_col)[kpi].transform("std")
+            self.df[f"{kpi}_z"] = (self.df[kpi] - group_mean) / group_std
+
+    def get_player_data(self, player_name: str) -> tuple:
+        """
+        Get data for a specific player.
+        Returns: (player_df, positions, team_name)
+        """
+        player_df = self.df[self.df["player_name"] == player_name]
+        if player_df.empty:
+            return None, None, None
+
+        positions = player_df[self.pos_col].value_counts().index.tolist()
+        team_name = player_df.iloc[0]["team_name"]
+        return player_df, positions, team_name
+
+    def get_position_data(self, position: str) -> pd.DataFrame:
+        """Get all players' data for a specific position."""
+        return self.df[self.df[self.pos_col] == position]
