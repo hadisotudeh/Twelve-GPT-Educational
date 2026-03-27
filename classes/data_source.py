@@ -589,8 +589,6 @@ class PositionVersatilityStats(Data):
             "Versatility",
             "Vertical Center of Gravity",
             "Lateral Center of Gravity",
-            "Vertical Range",
-            "Lateral Range",
         ]
         self.pos_col = "skillcorner_position"
         super().__init__()

@@ -67,31 +67,34 @@ def main():
         st.error(f"Player {selected_player} not found.")
         st.stop()
 
+    # ── Get main (most frequent) position ────────────────────────────────
+    main_pos = positions[0]  # positions are sorted by frequency (value_counts)
+    main_positions = [main_pos]
+
     # ── KPI definitions in one clean dropdown ────────────────────────────
     with st.expander("KPI definitions", expanded=False):
         st.markdown(visual.get_kpi_definitions())
 
-    # ── One distribution plot per position (all KPIs in each figure) ─────
+    # ── Distribution plot for main position only ────────────────────────
     st.subheader("Positional Distribution Analysis")
-    for pos in positions:
-        df_pos = stats.get_position_data(pos)
-        player_pos_df = player_df[player_df[stats.pos_col] == pos]
+    df_pos = stats.get_position_data(main_pos)
+    player_pos_df = player_df[player_df[stats.pos_col] == main_pos]
 
-        fig = visual.create_position_kpi_plot(
-            pos, selected_player, df_pos, player_pos_df, player_team
-        )
+    fig = visual.create_position_kpi_plot(
+        main_pos, selected_player, df_pos, player_pos_df, player_team
+    )
 
-        st.plotly_chart(fig, config={"displayModeBar": False}, use_container_width=True)
+    st.plotly_chart(fig, config={"displayModeBar": False}, width="stretch")
 
     st.divider()
 
-    # ── Generate natural language description ─────────────────────────────
+    # ── Generate natural language description for main position only ────
     st.subheader("Wordalisation")
     
     # Generate description
     description = PositionVersatilityDescription(
         player_df=player_df,
-        positions=positions,
+        positions=main_positions,
         player_name=selected_player,
         player_team=player_team,
         stats=stats,

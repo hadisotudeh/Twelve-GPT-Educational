@@ -744,11 +744,11 @@ class PositionVersatilityDescription(Description):
             {
                 "role": "system",
                 "content": (
-                    "You are a football position analyst. "
-                    "You provide clear, data-driven explanations about how players position themselves on the pitch. "
-                    "You analyze each position a player plays separately, noting the number of matches in each role. "
-                    "You use positional versatility metrics and z-scores to explain how players perform in each specific role and compare to peers. "
-                    "You focus on tactical implications, role-specific performance, and playing style based on positioning data."
+                    "You are a UK-based football position analyst. "
+                    "You provide clear, data-driven explanations about players inferred positional behavior. "
+                    "You note the number of matches a player operates in a position. "
+                    "You use positional versatility, lateral center of gravity, and vertical center of gravity metrics, which are in z-scores to explain how a players compares to his/her peers in that specific KPI. "
+                    "You focus playing style implications based on that data."
                 ),
             },
         ]
@@ -756,7 +756,7 @@ class PositionVersatilityDescription(Description):
             intro += [
                 {
                     "role": "user",
-                    "content": "First, could you answer some questions about positional versatility and position-specific analysis?",
+                    "content": "First, could you answer some questions about positional versatility KPIs?",
                 },
                 {"role": "assistant", "content": "Sure!"},
             ]
@@ -796,7 +796,7 @@ class PositionVersatilityDescription(Description):
             elif z_versatility < -0.5:
                 position_narratives.append("operated with notable positional specialization")
             else:
-                position_narratives.append("displayed typical versatility for the role")
+                position_narratives.append("displayed typical versatility for the position")
 
             # Vertical Center of Gravity
             z_vcog = position_z_data["Vertical Center of Gravity_z"]
@@ -820,20 +820,6 @@ class PositionVersatilityDescription(Description):
             else:
                 position_narratives.append("maintained central positioning")
 
-            # Vertical Range
-            z_vrange = position_z_data["Vertical Range_z"]
-            if z_vrange > 0.5:
-                position_narratives.append("covered significant ground vertically")
-            elif z_vrange < -0.5:
-                position_narratives.append("operated within a narrow vertical band")
-
-            # Lateral Range
-            z_lrange = position_z_data["Lateral Range_z"]
-            if z_lrange > 0.5:
-                position_narratives.append("ranged widely across the pitch width")
-            elif z_lrange < -0.5:
-                position_narratives.append("stayed concentrated in a narrow area")
-
             # Combine narratives into cohesive text
             position_text = f"**{position}** ({n_matches} {match_suffix}): In this role, {self.player_name} " + ", ".join(position_narratives).lower() + ". "
             description += position_text + "\n"
@@ -845,9 +831,12 @@ class PositionVersatilityDescription(Description):
         Task instructions for the LLM, emphasizing position-specific analysis.
         """
         prompt = (
-            f"Please use the statistical description enclosed with ``` to provide a brief summary "
-            f"of {self.player_name}'s positional versatility in exactly 5 sentences maximum. "
-            f"Write in flowing narrative text without bullet points. For each position, briefly explain how his KPI profile compared to peers "
-            f"and highlight tactical implications. Conclude with an overall assessment of his positional flexibility."
+            f"Write a brief football positional analysis of the selected player for fans in exactly 5 sentences maximum. "
+            f"Use the data-driven style of a football data journalist — accessible, insightful, and entertaining for general audiences. "
+            f"For a position, explain how {self.player_name}'s positional behavior stack up against peers in engaging language. "
+            f"Highlight what his positioning data reveals about his playing style. "
+            f"Conclude with a punchy assessment of his positional adaptability and what it means for how he plays. "
+            f"Avoid jargon and hellosiation and only rely on this data (KPIs) only."
+            f"Keep it simple langauge understandable for fans who are not native English speakers."
         )
         return [{"role": "user", "content": prompt}]

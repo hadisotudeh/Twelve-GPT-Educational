@@ -584,8 +584,6 @@ class PositionVersatilityVisual:
             "Versatility",
             "Vertical Center of Gravity",
             "Lateral Center of Gravity",
-            "Vertical Range",
-            "Lateral Range",
         ]
 
     def _base_layout(self, fig, height=500):
@@ -700,8 +698,8 @@ class PositionVersatilityVisual:
         )
 
         all_z = df_pos[[f"{k}_z" for k in self.kpi_columns]].stack().dropna()
-        x_min = all_z.min() - 0.5
-        x_max = all_z.max() + 0.5
+        x_min = max(all_z.min() - 0.5, -3)
+        x_max = min(all_z.max() + 0.5, 3)
         fig.update_xaxes(
             range=[x_min, x_max],
             fixedrange=True,
