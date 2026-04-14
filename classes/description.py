@@ -286,10 +286,8 @@ class PlayerDescription(Description):
             {
                 "role": "system",
                 "content": (
-                    "You are a UK-based football scout. "
-                    "You provide succinct and to the point explanations about football players using data. "
-                    "You use the information given to you from the data and answers "
-                    "to earlier user/assistant pairs to give summaries of players."
+                    "You are a UK-based football football data journalist. "
+                    "You provide to the point, engaging, and accurate explanations about players using data. "
                 ),
             },
             {
@@ -337,10 +335,10 @@ class PlayerDescription(Description):
 
     def get_prompt_messages(self):
         prompt = (
-            f"Please use the statistical description enclosed with ``` to give a concise, 4 sentence summary of the player's playing style, strengths and weaknesses. "
-            f"The first sentence should use varied language to give an overview of the player. "
-            "The second sentence should describe the player's specific strengths based on the metrics. "
-            "The third sentence should describe aspects in which the player is average and/or weak based on the statistics. "
+            f"Please use the statistical description enclosed with ``` to give a concise, 4 sentence summary of the player's tactical positional behavior. "
+            f"The first sentence should use describe players full name and tactical position (no accronym) and number of matches. "
+            "The second sentence should describe the player's in-possesoin KPIs. "
+            "The third sentence should describe the player's out-of-possesoin KPIs. "
             "Finally, summarise exactly how the player compares to others in the same position. "
         )
         return [{"role": "user", "content": prompt}]
@@ -747,8 +745,7 @@ class PositionVersatilityDescription(Description):
                     "You are a UK-based football position analyst. "
                     "You provide clear, data-driven explanations about players inferred positional behavior. "
                     "You note the number of matches a player operates in a position. "
-                    "You use positional versatility, lateral center of gravity, and vertical center of gravity metrics, which are in z-scores to explain how a players compares to his/her peers in that specific KPI. "
-                    "You focus playing style implications based on that data."
+                    "You use in-possession and out-of-possession versatility, lateral center of gravity, and vertical center of gravity metrics, which are in z-scores to explain how a player compares to peers in that KPI. "
                 ),
             },
         ]
@@ -789,36 +786,67 @@ class PositionVersatilityDescription(Description):
             # Build position-specific narrative description
             position_narratives = []
 
-            # Versatility
-            z_versatility = position_z_data["Versatility_z"]
-            if z_versatility > 0.5:
-                position_narratives.append("showed above-average versatility across the pitch")
-            elif z_versatility < -0.5:
-                position_narratives.append("operated with notable positional specialization")
+            # In-possession versatility
+            z_in_vers = position_z_data["in_possession_versatility_z"]
+            if z_in_vers > 0.5:
+                position_narratives.append("appeared in a broad range of tactical positions in possession")
+            elif z_in_vers < -0.5:
+                position_narratives.append("focusd on specific tactical positions in possession")
             else:
-                position_narratives.append("displayed typical versatility for the position")
+                position_narratives.append("showed typical in-possession variety for this role")
 
-            # Vertical Center of Gravity
-            z_vcog = position_z_data["Vertical Center of Gravity_z"]
-            if z_vcog > 0.5:
-                position_narratives.append("took an attacking position higher up the pitch")
-            elif z_vcog < -0.5:
-                position_narratives.append("maintained a deeper, more defensive depth")
+            # Out-of-possession versatility
+            z_out_vers = position_z_data["out_of_possession_versatility_z"]
+            if z_out_vers > 0.5:
+                position_narratives.append("covered many tactical positions when out of possession")
+            elif z_out_vers < -0.5:
+                position_narratives.append("focusd on specific tactical positions when out of possession")
             else:
-                position_narratives.append("held typical positioning depth")
+                position_narratives.append("showed typical out-of-possession coverage")
 
-            # Lateral positioning
-            z_lcog = position_z_data["Lateral Center of Gravity_z"]
-            if z_lcog > 1:
-                position_narratives.append("positioned heavily on the right flank")
-            elif z_lcog > 0.3:
-                position_narratives.append("favored the right side")
-            elif z_lcog < -1:
-                position_narratives.append("positioned heavily on the left flank")
-            elif z_lcog < -0.3:
-                position_narratives.append("favored the left side")
+            # In-possession vertical positioning
+            z_in_vcog = position_z_data["in_possession_vertical_center_of_gravity_z"]
+            if z_in_vcog > 0.5:
+                position_narratives.append("appeared in higher tactical positions when in possession")
+            elif z_in_vcog < -0.5:
+                position_narratives.append("operated deeper in possession")
             else:
-                position_narratives.append("maintained central positioning")
+                position_narratives.append("held typical in-possession depth")
+
+            # Out-of-possession vertical positioning
+            z_out_vcog = position_z_data["out_of_possession_vertical_center_of_gravity_z"]
+            if z_out_vcog > 0.5:
+                position_narratives.append("defended relatively high")
+            elif z_out_vcog < -0.5:
+                position_narratives.append("defended from deeper positions")
+            else:
+                position_narratives.append("kept typical defensive depth")
+
+            # In-possession lateral positioning
+            z_in_lcog = position_z_data["in_possession_lateral_center_of_gravity_z"]
+            if z_in_lcog > 1:
+                position_narratives.append("leaned strongly to the right in possession")
+            elif z_in_lcog > 0.3:
+                position_narratives.append("favored the right lane in possession")
+            elif z_in_lcog < -1:
+                position_narratives.append("leaned strongly to the left in possession")
+            elif z_in_lcog < -0.3:
+                position_narratives.append("favored the left lane in possession")
+            else:
+                position_narratives.append("was laterally balanced in possession")
+
+            # Out-of-possession lateral positioning
+            z_out_lcog = position_z_data["out_of_possession_lateral_center_of_gravity_z"]
+            if z_out_lcog > 1:
+                position_narratives.append("defended predominantly on the right side")
+            elif z_out_lcog > 0.3:
+                position_narratives.append("defended slightly right of center")
+            elif z_out_lcog < -1:
+                position_narratives.append("defended predominantly on the left side")
+            elif z_out_lcog < -0.3:
+                position_narratives.append("defended slightly left of center")
+            else:
+                position_narratives.append("defended with central lateral balance")
 
             # Combine narratives into cohesive text
             position_text = f"**{position}** ({n_matches} {match_suffix}): In this role, {self.player_name} " + ", ".join(position_narratives).lower() + ". "
@@ -833,10 +861,10 @@ class PositionVersatilityDescription(Description):
         prompt = (
             f"Write a brief football positional analysis of the selected player for fans in exactly 5 sentences maximum. "
             f"Use the data-driven style of a football data journalist — accessible, insightful, and entertaining for general audiences. "
+            f"For players, just use their surname (E. Haaland to Haaland) when writing the text. "
             f"For a position, explain how {self.player_name}'s positional behavior stack up against peers in engaging language. "
-            f"Highlight what his positioning data reveals about his playing style. "
-            f"Conclude with a punchy assessment of his positional adaptability and what it means for how he plays. "
             f"Avoid jargon and hellosiation and only rely on this data (KPIs) only."
-            f"Keep it simple langauge understandable for fans who are not native English speakers."
+            f"For the position, instead of using accronyms, use the full name of the position. For example, instead of saying 'CM' say 'central midfielder'. "
+            f"Keep it simple langauge understandable for fans who are not native English speakers and avoid chit-chat."
         )
         return [{"role": "user", "content": prompt}]

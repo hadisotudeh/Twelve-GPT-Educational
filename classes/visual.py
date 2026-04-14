@@ -581,10 +581,21 @@ class PositionVersatilityVisual:
 
     def __init__(self):
         self.kpi_columns = [
-            "Versatility",
-            "Vertical Center of Gravity",
-            "Lateral Center of Gravity",
+            "in_possession_versatility",
+            "in_possession_vertical_center_of_gravity",
+            "in_possession_lateral_center_of_gravity",
+            "out_of_possession_versatility",
+            "out_of_possession_vertical_center_of_gravity",
+            "out_of_possession_lateral_center_of_gravity",
         ]
+        self.kpi_label_map = {
+            "in_possession_versatility": "In-possession versatility",
+            "in_possession_vertical_center_of_gravity": "In-possession vertical COG",
+            "in_possession_lateral_center_of_gravity": "In-possession lateral COG",
+            "out_of_possession_versatility": "Out-of-possession versatility",
+            "out_of_possession_vertical_center_of_gravity": "Out-of-possession vertical COG",
+            "out_of_possession_lateral_center_of_gravity": "Out-of-possession lateral COG",
+        }
 
     def _base_layout(self, fig, height=500):
         """Apply the shared Twelve dark-green layout to a figure."""
@@ -643,6 +654,7 @@ class PositionVersatilityVisual:
         showlegend_group = True
         for i, kpi in enumerate(self.kpi_columns):
             z_col = f"{kpi}_z"
+            kpi_label = self.kpi_label_map[kpi]
             fig.add_trace(
                 go.Scatter(
                     x=df_agg[z_col].tolist(),
@@ -655,7 +667,7 @@ class PositionVersatilityVisual:
                         line_color=self.BRIGHT_GREEN.format(a=1),
                     ),
                     text=df_agg["player_name"],
-                    hovertemplate="%{text}<br>" + kpi + " z: %{x:.2f}<extra></extra>",
+                    hovertemplate="%{text}<br>" + kpi_label + " z: %{x:.2f}<extra></extra>",
                     name="Other players  ",
                     showlegend=showlegend_group,
                 )
@@ -667,6 +679,7 @@ class PositionVersatilityVisual:
         showlegend_player = True
         for i, kpi in enumerate(self.kpi_columns):
             z_col = f"{kpi}_z"
+            kpi_label = self.kpi_label_map[kpi]
             fig.add_trace(
                 go.Scatter(
                     x=[player_agg[z_col]],
@@ -680,7 +693,7 @@ class PositionVersatilityVisual:
                         line_color=self.WHITE.format(a=1),
                     ),
                     text=[player_name],
-                    hovertemplate="%{text}<br>" + kpi + " z: %{x:.2f}<extra></extra>",
+                    hovertemplate="%{text}<br>" + kpi_label + " z: %{x:.2f}<extra></extra>",
                     name=player_name,
                     showlegend=showlegend_player,
                 )
@@ -711,7 +724,7 @@ class PositionVersatilityVisual:
         fig.update_yaxes(
             tickmode="array",
             tickvals=list(range(len(self.kpi_columns))),
-            ticktext=self.kpi_columns,
+            ticktext=[self.kpi_label_map[kpi] for kpi in self.kpi_columns],
             fixedrange=True,
             gridcolor=self.MEDIUM_GREEN,
             zerolinecolor=self.MEDIUM_GREEN,
@@ -730,75 +743,59 @@ class PositionVersatilityVisual:
     def get_kpi_definitions(self) -> str:
         """Get markdown string with all KPI definitions."""
         kpi_descriptions = {
-            "Versatility": r"""
-**Versatility** measures how spread out a player's positioning is across the pitch.
-It is the **Shannon entropy** of the 25-zone position profile.
+            "in_possession_versatility": r"""
+**In-possession versatility** measures how broadly a player occupies different zones while their team has the ball.
 
-The pitch is divided into a 5×5 grid (5 rows from defence to attack, 5 columns from left to right).
-Each zone $i$ has a value $p_i$ — the fraction of time the player spent there.
-
-$$H = -\sum_{i=1}^{25} p_i \, \ln(p_i)$$
-
-| z-score | Interpretation | Example |
-|---|---|---|
-| **z ≈ 0** | Average positional spread | A centre-back who occasionally steps into midfield |
-| **z > 0** | More versatile — occupied many zones | A box-to-box midfielder who drops deep to collect the ball and also pushes into the final third |
-| **z < 0** | More specialised — concentrated in fewer zones | A target striker who stays almost exclusively in the centre-forward zone |
+| z-score | Interpretation |
+|---|---|
+| **z > 0** | More varied attacking positioning than peers in the same role |
+| **z < 0** | More specialized attacking positioning than peers in the same role |
 """,
-            "Vertical Center of Gravity": r"""
-**Vertical Center of Gravity** is the average depth at which a player positions themselves on the pitch.
+            "in_possession_vertical_center_of_gravity": r"""
+**In-possession vertical COG** is the average attacking depth of a player when their team has the ball.
 
-Each of the 5 rows in the grid has a row number (1 = deepest/defensive, 5 = highest/attacking).
-The metric is the weighted mean of these row numbers, where the weight is $p_i$ (fraction of time in that zone):
-
-$$\text{Vertical COG} = \sum_{i=1}^{25} p_i \cdot \text{row}_i$$
-
-| z-score | Interpretation | Example |
-|---|---|---|
-| **z > 0** | Positioned higher / more attacking than peers in the same role | A left-back who pushes up to the wing like an auxiliary winger |
-| **z < 0** | Positioned deeper / more defensive than peers in the same role | A defensive midfielder who sits right in front of the centre-backs instead of advancing |
+| z-score | Interpretation |
+|---|---|
+| **z > 0** | Operates higher up the pitch in possession than peers |
+| **z < 0** | Operates deeper in possession than peers |
 """,
-            "Lateral Center of Gravity": r"""
-**Lateral Center of Gravity** is the average left-right position of a player on the pitch.
+            "in_possession_lateral_center_of_gravity": r"""
+**In-possession lateral COG** is the average left-right attacking lane when their team has the ball.
 
-Each of the 5 columns in the grid has a column number (1 = far left, 5 = far right).
-The metric is the weighted mean of these column numbers, where the weight is $p_i$ (fraction of time in that zone):
-
-$$\text{Lateral COG} = \sum_{i=1}^{25} p_i \cdot \text{col}_i$$
-
-| z-score | Interpretation | Example |
-|---|---|---|
-| **z > 0** | Biased more to the right than peers in the same role | A centre-mid who consistently drifts to the right half-space |
-| **z < 0** | Biased more to the left than peers in the same role | A striker who favours the left channel rather than staying central |
+| z-score | Interpretation |
+|---|---|
+| **z > 0** | Favors right-sided attacking zones versus peers |
+| **z < 0** | Favors left-sided attacking zones versus peers |
 """,
-            "Vertical Range": r"""
-**Vertical Range** measures how much ground a player covers along the depth axis (defence ↔ attack).
+            "out_of_possession_versatility": r"""
+**Out-of-possession versatility** measures how broadly a player covers zones while defending.
 
-It is the weighted standard deviation of the row numbers, where the weight is $p_i$ (fraction of time in that zone)
-and $\text{Vertical COG}$ is the player's average row position:
-
-$$\text{Vertical Range} = \sqrt{\sum_{i=1}^{25} p_i \,(\text{row}_i - \text{Vertical COG})^2}$$
-
-| z-score | Interpretation | Example |
-|---|---|---|
-| **z > 0** | Covers more depth than peers | A wing-back who tracks back to their own box and also arrives in the opposition box |
-| **z < 0** | Covers less depth than peers | A centre-back who holds a strict line and rarely ventures beyond the halfway mark |
+| z-score | Interpretation |
+|---|---|
+| **z > 0** | Defends across more zones than peers in the same role |
+| **z < 0** | Defends in a more fixed structure than peers |
 """,
-            "Lateral Range": r"""
-**Lateral Range** measures how much ground a player covers along the width axis (left ↔ right).
+            "out_of_possession_vertical_center_of_gravity": r"""
+**Out-of-possession vertical COG** is the average defensive depth when the team does not have the ball.
 
-It is the weighted standard deviation of the column numbers, where the weight is $p_i$ (fraction of time in that zone)
-and $\text{Lateral COG}$ is the player's average column position:
+| z-score | Interpretation |
+|---|---|
+| **z > 0** | Defends higher up the pitch than peers |
+| **z < 0** | Defends deeper than peers |
+""",
+            "out_of_possession_lateral_center_of_gravity": r"""
+**Out-of-possession lateral COG** is the average left-right defensive lane while out of possession.
 
-$$\text{Lateral Range} = \sqrt{\sum_{i=1}^{25} p_i \,(\text{col}_i - \text{Lateral COG})^2}$$
-
-| z-score | Interpretation | Example |
-|---|---|---|
-| **z > 0** | Covers more width than peers | A winger who drifts inside to the half-space and also hugs the touchline |
-| **z < 0** | Covers less width than peers | A central midfielder who stays narrow through the middle of the pitch |
+| z-score | Interpretation |
+|---|---|
+| **z > 0** | Defensive activity is shifted to the right side versus peers |
+| **z < 0** | Defensive activity is shifted to the left side versus peers |
 """,
         }
 
         return "\n\n---\n\n".join(
-            [f"### {kpi}\n\n{kpi_descriptions[kpi].strip()}" for kpi in self.kpi_columns]
+            [
+                f"### {self.kpi_label_map[kpi]}\n\n{kpi_descriptions[kpi].strip()}"
+                for kpi in self.kpi_columns
+            ]
         )

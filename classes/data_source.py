@@ -586,11 +586,14 @@ class PositionVersatilityStats(Data):
 
     def __init__(self):
         self.kpi_columns = [
-            "Versatility",
-            "Vertical Center of Gravity",
-            "Lateral Center of Gravity",
+            "in_possession_versatility",
+            "in_possession_vertical_center_of_gravity",
+            "in_possession_lateral_center_of_gravity",
+            "out_of_possession_versatility",
+            "out_of_possession_vertical_center_of_gravity",
+            "out_of_possession_lateral_center_of_gravity",
         ]
-        self.pos_col = "skillcorner_position"
+        self.pos_col = "position"
         super().__init__()
         self._compute_z_scores()
 
@@ -600,13 +603,15 @@ class PositionVersatilityStats(Data):
 
     def process_data(self, df_raw: pd.DataFrame) -> pd.DataFrame:
         """Minimal processing - data is already clean."""
+        for col in self.kpi_columns:
+            df_raw[col] = pd.to_numeric(df_raw[col], errors="coerce")
         return df_raw
 
     def _compute_z_scores(self):
         """Compute z-scores for each KPI within position groups."""
         for kpi in self.kpi_columns:
             group_mean = self.df.groupby(self.pos_col)[kpi].transform("mean")
-            group_std = self.df.groupby(self.pos_col)[kpi].transform("std")
+            group_std = self.df.groupby(self.pos_col)[kpi].transform("std").replace(0, np.nan)
             self.df[f"{kpi}_z"] = (self.df[kpi] - group_mean) / group_std
 
     def get_player_data(self, player_name: str) -> tuple:
