@@ -890,7 +890,6 @@ class PositionVersatilityDescription(Description):
         """
         prompt = (
             f"Write a brief football positional analysis of the selected player for fans in exactly 5 sentences maximum. "
-            f"Use the data-driven style of a football data journalist — accessible, insightful, and entertaining for general audiences. "
             f"For players, just use their surname (E. Haaland to Haaland) when writing the text. "
             f"For a position, explain how {self.player_name}'s positional behavior stack up against peers in engaging language. "
             f"Avoid jargon and hellosiation and only rely on this data (KPIs) only."
