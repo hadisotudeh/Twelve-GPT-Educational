@@ -7,9 +7,11 @@ import streamlit as st
 import fitz
 
 from utils.page_components import add_common_page_elements
+from utils.utils import create_chat
 from classes.data_source import PositionVersatilityStats
 from classes.visual import PositionVersatilityVisual
 from classes.description import PositionVersatilityDescription
+from classes.chat import PositionVersatilityChat
 
 
 def draw_position_maps(player_df, pos_col, selected_player):
@@ -75,40 +77,55 @@ def main():
     with st.expander("KPI definitions", expanded=False):
         st.markdown(visual.get_kpi_definitions())
 
-    # ── Distribution plot for main position only ────────────────────────
-    st.subheader("Positional Distribution Analysis")
-    df_pos = stats.get_position_data(main_pos)
-    player_pos_df = player_df[player_df[stats.pos_col] == main_pos]
+    # Show the versatility analysis context — persists across chat turns via session state
+    if "description_transcript" in st.session_state:
+        st.expander("Versatility Analysis Context", expanded=False).write(
+            st.session_state["description_transcript"]
+        )
 
-    fig = visual.create_position_kpi_plot(
-        main_pos, selected_player, df_pos, player_pos_df, player_team
-    )
+    # ── Chat interface ──────────────────────────────────────────────────
+    # Chat state hash determines whether or not we should load a new chat or continue an old one
+    to_hash = (selected_player, "position_scout")
+    chat = create_chat(to_hash, PositionVersatilityChat, selected_player, stats)
 
-    st.plotly_chart(fig, config={"displayModeBar": False}, width="stretch")
+    # Now we want to add basic content to chat if it's empty
+    if chat.state == "empty":
+        # Generate the distribution plot for the main position
+        df_pos = stats.get_position_data(main_pos)
+        player_pos_df = player_df[player_df[stats.pos_col] == main_pos]
 
-    st.divider()
+        fig = visual.create_position_kpi_plot(
+            main_pos, selected_player, df_pos, player_pos_df, player_team
+        )
 
-    # ── Generate natural language description for main position only ────
-    st.subheader("Wordalisation")
-    
-    # Generate description
-    description = PositionVersatilityDescription(
-        player_df=player_df,
-        positions=main_positions,
-        player_name=selected_player,
-        player_team=player_team,
-        stats=stats,
-    )
-    
-    # Stream the GPT summary
-    summary = description.stream_gpt(stream=True)
-    st.write(summary)
-    
-    st.divider()
+        # Generate description
+        description = PositionVersatilityDescription(
+            player_df=player_df,
+            positions=main_positions,
+            player_name=selected_player,
+            player_team=player_team,
+            stats=stats,
+        )
+        
+        # Stream the GPT summary
+        summary = description.stream_gpt(stream=True)
 
-    # ── Position maps from cases.pdf ─────────────────────────────────────
-    st.subheader(f"Position maps – {selected_player}")
-    draw_position_maps(player_df, stats.pos_col, selected_player)
+        # Add the visualization and summary to the chat
+        chat.add_message(
+            "Please can you summarise " + selected_player + " for me?",
+            role="user",
+            user_only=False,
+            visible=False,
+        )
+        chat.add_message(fig)
+        chat.add_message(summary)
+
+        chat.state = "default"
+
+    # Now we want to get the user input, display the messages and save the state
+    chat.get_input()
+    chat.display_messages()
+    chat.save_state()
 
 
 if __name__ == "__main__":

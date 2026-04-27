@@ -565,7 +565,7 @@ class DistributionPlotPersonality(Visual):
         st.plotly_chart(fig)"""
 
 
-class PositionVersatilityVisual:
+class PositionVersatilityVisual(Visual):
     """
     Handles all visualizations for position versatility analysis.
     """
@@ -580,6 +580,7 @@ class PositionVersatilityVisual:
     FONT_BODY = "Gilroy-Light"
 
     def __init__(self):
+        super().__init__()
         self.kpi_columns = [
             "in_possession_versatility",
             "in_possession_vertical_center_of_gravity",
@@ -639,11 +640,11 @@ class PositionVersatilityVisual:
 
     def create_position_kpi_plot(
         self, position: str, player_name: str, df_pos: pd.DataFrame, player_pos_df: pd.DataFrame, player_team: str
-    ) -> go.Figure:
+    ):
         """
         Create KPI distribution plot for a position comparing selected player to peers.
         """
-        fig = go.Figure()
+        self.fig = go.Figure()
 
         # Aggregate to one dot per player (mean z-score within this position)
         df_agg = df_pos.groupby("player_name", as_index=False)[
@@ -655,7 +656,7 @@ class PositionVersatilityVisual:
         for i, kpi in enumerate(self.kpi_columns):
             z_col = f"{kpi}_z"
             kpi_label = self.kpi_label_map[kpi]
-            fig.add_trace(
+            self.fig.add_trace(
                 go.Scatter(
                     x=df_agg[z_col].tolist(),
                     y=[i] * len(df_agg),
@@ -680,7 +681,7 @@ class PositionVersatilityVisual:
         for i, kpi in enumerate(self.kpi_columns):
             z_col = f"{kpi}_z"
             kpi_label = self.kpi_label_map[kpi]
-            fig.add_trace(
+            self.fig.add_trace(
                 go.Scatter(
                     x=[player_agg[z_col]],
                     y=[i],
@@ -700,12 +701,12 @@ class PositionVersatilityVisual:
             )
             showlegend_player = False
 
-        self._base_layout(fig, height=max(360, len(self.kpi_columns) * 70))
+        self._base_layout(self.fig, height=max(360, len(self.kpi_columns) * 70))
 
         n_matches = len(player_pos_df)
         suffix = "match" if n_matches == 1 else "matches"
         self._add_title(
-            fig,
+            self.fig,
             f"{player_name} at {position} – KPI distribution (z-scores)",
             f"{player_team} · {n_matches} {suffix} in this position",
         )
@@ -713,7 +714,7 @@ class PositionVersatilityVisual:
         all_z = df_pos[[f"{k}_z" for k in self.kpi_columns]].stack().dropna()
         x_min = max(all_z.min() - 0.5, -3)
         x_max = min(all_z.max() + 0.5, 3)
-        fig.update_xaxes(
+        self.fig.update_xaxes(
             range=[x_min, x_max],
             fixedrange=True,
             title=dict(
@@ -721,7 +722,7 @@ class PositionVersatilityVisual:
                 font=dict(color=self.WHITE.format(a=0.6), family=self.FONT_BODY, size=11),
             ),
         )
-        fig.update_yaxes(
+        self.fig.update_yaxes(
             tickmode="array",
             tickvals=list(range(len(self.kpi_columns))),
             ticktext=[self.kpi_label_map[kpi] for kpi in self.kpi_columns],
@@ -729,7 +730,7 @@ class PositionVersatilityVisual:
             gridcolor=self.MEDIUM_GREEN,
             zerolinecolor=self.MEDIUM_GREEN,
         )
-        fig.add_shape(
+        self.fig.add_shape(
             type="line",
             x0=0,
             y0=-0.5,
@@ -738,7 +739,7 @@ class PositionVersatilityVisual:
             line=dict(color="gray", width=1, dash="dot"),
         )
 
-        return fig
+        return self
 
     def get_kpi_definitions(self) -> str:
         """Get markdown string with all KPI definitions."""
