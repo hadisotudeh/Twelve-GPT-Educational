@@ -26,10 +26,16 @@ from classes.description import (
     PlayerDescription,
     CountryDescription,
     PersonDescription,
+    PositionVersatilityDescription,
 )
 from classes.embeddings import PlayerEmbeddings, CountryEmbeddings, PersonEmbeddings
 
-from classes.visual import Visual, DistributionPlot, DistributionPlotPersonality
+from classes.visual import (
+    Visual,
+    DistributionPlot,
+    DistributionPlotPersonality,
+    PositionVersatilityVisual,
+)
 
 import utils.sentences as sentences
 from utils.gemini import convert_messages_format
@@ -386,118 +392,119 @@ class PlayerChat(Chat):
             super().handle_input(input, reasoning_effort=reasoning_effort, temperature=temperature, stream=stream)
             return
         # OpenAI function-calling path
-        messages = self.instruction_messages()
-        messages = messages + self.messages_to_display.copy()
-        messages = [m for m in messages if isinstance(m["content"], str)]
-        messages.append({"role": "user", "content": f"```User: {input}```"})
+        with st.spinner("Processing your question..."):
+            messages = self.instruction_messages()
+            messages = messages + self.messages_to_display.copy()
+            messages = [m for m in messages if isinstance(m["content"], str)]
+            messages.append({"role": "user", "content": f"```User: {input}```"})
 
-        self.messages_to_display.append({"role": "user", "content": input})
+            self.messages_to_display.append({"role": "user", "content": input})
 
-        client = OpenAI(api_key=GPT_KEY, base_url=GPT_BASE)
+            client = OpenAI(api_key=GPT_KEY, base_url=GPT_BASE)
 
-        # Call 1: model picks a tool if relevant, or answers directly if not
-        r1 = client.responses.create(
-            model=GPT_CHAT_MODEL,
-            input=messages,
-            tools=self.tools,
-            tool_choice="auto",
-        )
-        fc = next((item for item in r1.output if item.type == "function_call"), None)
-
-        if fc is None:
-            # Model decided no tool was needed — use its response directly
-            st.expander("Chat transcript", expanded=False).write(
-                [{"role": m.get("role"), "content": m.get("content", "")} for m in messages if isinstance(m, dict)]
+            # Call 1: model picks a tool if relevant, or answers directly if not
+            r1 = client.responses.create(
+                model=GPT_CHAT_MODEL,
+                input=messages,
+                tools=self.tools,
+                tool_choice="auto",
             )
-            self.messages_to_display.append({"role": "assistant", "content": r1.output_text})
-            return
+            fc = next((item for item in r1.output if item.type == "function_call"), None)
 
-        if fc.name == "get_player_summary":
-            result = self._get_player_summary()
-        else:
-            result = self._search_knowledge(json.loads(fc.arguments)["query"])
+            if fc is None:
+                # Model decided no tool was needed — use its response directly
+                st.expander("Chat transcript", expanded=False).write(
+                    [{"role": m.get("role"), "content": m.get("content", "")} for m in messages if isinstance(m, dict)]
+                )
+                self.messages_to_display.append({"role": "assistant", "content": r1.output_text})
+                return
 
-        # Call 2: final answer, no more tools
-        tool_inputs = list(messages) + list(r1.output) + [
-            {"type": "function_call_output", "call_id": fc.call_id, "output": result}
-        ]
+            if fc.name == "get_player_summary":
+                result = self._get_player_summary()
+            else:
+                result = self._search_knowledge(json.loads(fc.arguments)["query"])
 
-        formatted = []
-        for item in tool_inputs:
-            if isinstance(item, dict):
-                if item.get("type") == "function_call_output":
-                    formatted.append({"tool_result": item["output"] or "(empty)", "call_id": item["call_id"]})
+            # Call 2: final answer, no more tools
+            tool_inputs = list(messages) + list(r1.output) + [
+                {"type": "function_call_output", "call_id": fc.call_id, "output": result}
+            ]
+
+            formatted = []
+            for item in tool_inputs:
+                if isinstance(item, dict):
+                    if item.get("type") == "function_call_output":
+                        formatted.append({"tool_result": item["output"] or "(empty)", "call_id": item["call_id"]})
+                    else:
+                        formatted.append({"role": item.get("role"), "content": item.get("content", "")})
+                elif hasattr(item, "type"):
+                    if item.type == "function_call":
+                        formatted.append({"tool_call": item.name, "arguments": json.loads(item.arguments)})
+                    # reasoning items are skipped
+            st.expander("Chat transcript", expanded=False).write(formatted)
+           
+            if stream:
+                if GPT_SUPPORTS_REASONING:
+                    reasoning_effort = reasoning_effort if reasoning_effort in GPT_AVAILABLE_REASONING_EFFORTS else GPT_AVAILABLE_REASONING_EFFORTS[0]
+                    response_stream = client.responses.create(
+                        model=GPT_CHAT_MODEL,
+                        input=tool_inputs,
+                        tool_choice="none",
+                        tools=self.tools,
+                        reasoning={"effort": reasoning_effort},
+                        stream=True,
+                    )
+                elif GPT_SUPPORTS_TEMPERATURE:
+                    response_stream = client.responses.create(
+                        model=GPT_CHAT_MODEL,
+                        input=tool_inputs,
+                        tool_choice="none",
+                        tools=self.tools,
+                        temperature=temperature,
+                        stream=True,
+                    )
                 else:
-                    formatted.append({"role": item.get("role"), "content": item.get("content", "")})
-            elif hasattr(item, "type"):
-                if item.type == "function_call":
-                    formatted.append({"tool_call": item.name, "arguments": json.loads(item.arguments)})
-                # reasoning items are skipped
-        st.expander("Chat transcript", expanded=False).write(formatted)
-       
-        if stream:
-            if GPT_SUPPORTS_REASONING:
-                reasoning_effort = reasoning_effort if reasoning_effort in GPT_AVAILABLE_REASONING_EFFORTS else GPT_AVAILABLE_REASONING_EFFORTS[0]
-                response_stream = client.responses.create(
-                    model=GPT_CHAT_MODEL,
-                    input=tool_inputs,
-                    tool_choice="none",
-                    tools=self.tools,
-                    reasoning={"effort": reasoning_effort},
-                    stream=True,
-                )
-            elif GPT_SUPPORTS_TEMPERATURE:
-                response_stream = client.responses.create(
-                    model=GPT_CHAT_MODEL,
-                    input=tool_inputs,
-                    tool_choice="none",
-                    tools=self.tools,
-                    temperature=temperature,
-                    stream=True,
-                )
+                    response_stream = client.responses.create(
+                        model=GPT_CHAT_MODEL,
+                        input=tool_inputs,
+                        tool_choice="none",
+                        tools=self.tools,
+                        stream=True,
+                    )
+
+                def streamed_chunks():
+                    for event in response_stream:
+                        if event.type == "response.output_text.delta":
+                            yield event.delta
+
+                answer = streamed_chunks()
             else:
-                response_stream = client.responses.create(
-                    model=GPT_CHAT_MODEL,
-                    input=tool_inputs,
-                    tool_choice="none",
-                    tools=self.tools,
-                    stream=True,
-                )
+                if GPT_SUPPORTS_REASONING:
+                    reasoning_effort = reasoning_effort if reasoning_effort in GPT_AVAILABLE_REASONING_EFFORTS else GPT_AVAILABLE_REASONING_EFFORTS[0]
+                    response = client.responses.create(
+                        model=GPT_CHAT_MODEL,
+                        input=tool_inputs,
+                        tool_choice="none",
+                        tools=self.tools,
+                        reasoning={"effort": reasoning_effort},
+                    )
+                elif GPT_SUPPORTS_TEMPERATURE:
+                    response = client.responses.create(
+                        model=GPT_CHAT_MODEL,
+                        input=tool_inputs,
+                        tool_choice="none",
+                        tools=self.tools,
+                        temperature=temperature,
+                    )
+                else:
+                    response = client.responses.create(
+                        model=GPT_CHAT_MODEL,
+                        input=tool_inputs,
+                        tool_choice="none",
+                        tools=self.tools,
+                    )
+                answer = response.output_text
 
-            def streamed_chunks():
-                for event in response_stream:
-                    if event.type == "response.output_text.delta":
-                        yield event.delta
-
-            answer = streamed_chunks()
-        else:
-            if GPT_SUPPORTS_REASONING:
-                reasoning_effort = reasoning_effort if reasoning_effort in GPT_AVAILABLE_REASONING_EFFORTS else GPT_AVAILABLE_REASONING_EFFORTS[0]
-                response = client.responses.create(
-                    model=GPT_CHAT_MODEL,
-                    input=tool_inputs,
-                    tool_choice="none",
-                    tools=self.tools,
-                    reasoning={"effort": reasoning_effort},
-                )
-            elif GPT_SUPPORTS_TEMPERATURE:
-                response = client.responses.create(
-                    model=GPT_CHAT_MODEL,
-                    input=tool_inputs,
-                    tool_choice="none",
-                    tools=self.tools,
-                    temperature=temperature,
-                )
-            else:
-                response = client.responses.create(
-                    model=GPT_CHAT_MODEL,
-                    input=tool_inputs,
-                    tool_choice="none",
-                    tools=self.tools,
-                )
-            answer = response.output_text
-
-        self.messages_to_display.append({"role": "assistant", "content": answer})
+            self.messages_to_display.append({"role": "assistant", "content": answer})
 
     def get_relevant_info(self, query):
         # Used by the Gemini/LM Studio path via super().handle_input
@@ -670,20 +677,29 @@ class PositionVersatilityChat(Chat):
     tools = [
         {
             "type": "function",
-            "name": "get_player_versatility_summary",
-            "description": "Returns a data-driven statistical summary of the selected player's position versatility.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-        {
-            "type": "function",
             "name": "get_similar_players",
-            "description": "Finds players similar to the selected player based on their position versatility KPIs.",
+            "description": "Finds players similar to the selected player and returns one short prose explanation per player, preserving the KPI-based reasons for similarity.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "k": {
                         "type": "integer",
-                        "description": "Number of similar players to return (default 5).",
+                        "description": "Number of similar players to return (default 3).",
+                    }
+                },
+                "required": ["k"],
+            },
+        },
+        {
+            "type": "function",
+            "name": "get_most_different_players",
+            "description": "Finds players most different from the selected player based on their position versatility KPIs.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "k": {
+                        "type": "integer",
+                        "description": "Number of different players to return (default 3).",
                     }
                 },
                 "required": ["k"],
@@ -719,6 +735,21 @@ class PositionVersatilityChat(Chat):
                 "required": ["query"],
             },
         },
+        {
+            "type": "function",
+            "name": "query_summary",
+            "description": "Answers questions by searching within the player's versatility summary data.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "description": "The question to answer by searching the player summary.",
+                    }
+                },
+                "required": ["question"],
+            },
+        },
     ]
 
     def __init__(self, chat_state_hash, player_name, stats, state="empty"):
@@ -726,6 +757,17 @@ class PositionVersatilityChat(Chat):
         self.player_name = player_name
         self.stats = stats
         self.player_df, self.positions, self.player_team = stats.get_player_data(player_name)
+        
+        # Generate and cache the player summary
+        description = PositionVersatilityDescription(
+            player_df=self.player_df,
+            positions=self.positions,
+            player_name=self.player_name,
+            player_team=self.player_team,
+            stats=self.stats,
+        )
+        self.cached_summary = description.stream_gpt(stream=False)
+        
         super().__init__(chat_state_hash, state=state)
 
     def _get_player_versatility_summary(self):
@@ -750,7 +792,7 @@ class PositionVersatilityChat(Chat):
             result += f"- Out-of-possession versatility: {out_poss:.1f}\n"
             
             # Compare to position peers
-            all_pos_players = self.stats.get_position_data(main_pos)
+            all_pos_players = self.stats.get_main_position_data(main_pos)
             in_poss_mean = all_pos_players["in_possession_versatility"].mean()
             out_poss_mean = all_pos_players["out_of_possession_versatility"].mean()
             
@@ -762,75 +804,224 @@ class PositionVersatilityChat(Chat):
         
         return result
 
-    def _get_similar_players(self, k=5):
-        """Find players similar to the selected player based on z-score KPIs."""
-        # Get the main position
+    def _get_main_position_player_profiles(self):
+        """Aggregate main-position player profiles to one row per player."""
         main_pos = self.positions[0]
-        
-        # Get all players in the same position
-        all_pos_players = self.stats.get_position_data(main_pos)
-        
+        all_pos_players = self.stats.get_main_position_data(main_pos)
+
         if all_pos_players.empty:
-            return "No data available for the main position."
-        
-        # Get z-score columns
+            return None, None, None
+
         z_score_cols = [f"{k}_z" for k in self.stats.kpi_columns]
-        
-        # Calculate mean z-scores for the selected player
-        player_data = all_pos_players[all_pos_players["player_name"] == self.player_name]
+        profiles = all_pos_players.groupby("player_name", as_index=False).agg(
+            {
+                **{col: "mean" for col in z_score_cols},
+                "team_name": "first",
+                self.stats.pos_col: "size",
+            }
+        )
+        profiles = profiles.rename(columns={self.stats.pos_col: "match_count"})
+        profiles["average_kpi_z"] = profiles[z_score_cols].mean(axis=1)
+
+        player_data = profiles[profiles["player_name"] == self.player_name]
         if player_data.empty:
+            return all_pos_players, profiles, None
+
+        return all_pos_players, profiles, player_data.iloc[0]
+
+    def _get_similar_players(self, k=3):
+        """Find players similar to the selected player based on average KPI z-score."""
+        main_pos = self.positions[0]
+        all_pos_players, profiles, player_profile = self._get_main_position_player_profiles()
+
+        if all_pos_players is None:
+            return "No data available for the main position."
+
+        if player_profile is None:
             return f"{self.player_name} not found in {main_pos} position data."
-        
-        player_z_scores = player_data[z_score_cols].mean()
-        
-        # Calculate Euclidean distance and KPI comparisons for all players
-        distances = []
-        for idx, row in all_pos_players.iterrows():
-            if row["player_name"] == self.player_name:
-                continue
-            
-            other_z_scores = row[z_score_cols]
-            # Euclidean distance on z-scores
-            distance = np.sqrt(((player_z_scores - other_z_scores) ** 2).sum())
-            
-            # Per-KPI differences
-            kpi_diffs = {}
-            for kpi, col in zip(self.stats.kpi_columns, z_score_cols):
-                kpi_diffs[kpi] = abs(player_z_scores[col] - other_z_scores[col])
-            
-            # Count matches for this player in this position
-            player_matches = self.stats.df[
-                (self.stats.df["player_name"] == row["player_name"]) & 
-                (self.stats.df[self.stats.pos_col] == main_pos)
-            ]
-            match_count = len(player_matches)
-            
-            distances.append({
+
+        player_average = player_profile["average_kpi_z"]
+        profiles = profiles[profiles["player_name"] != self.player_name].copy()
+
+        profiles["distance"] = (profiles["average_kpi_z"] - player_average).abs()
+        similar = [
+            {
                 "player": row["player_name"],
                 "team": row["team_name"],
-                "distance": distance,
-                "kpi_diffs": kpi_diffs,
-                "z_scores": other_z_scores.to_dict(),
-                "match_count": match_count
-            })
+                "distance": row["distance"],
+                "match_count": row["match_count"],
+            }
+            for _, row in profiles.sort_values("distance").head(k).iterrows()
+        ]
+        self._last_similar_players = similar
         
-        # Sort by distance and get top k
-        distances = sorted(distances, key=lambda x: x["distance"])
-        similar = distances[:k]
+        if not similar:
+            return f"No similar players found for {self.player_name} as a {main_pos}."
+
+        ordinal_labels = [
+            "First",
+            "Second",
+            "Third",
+            "Fourth",
+            "Fifth",
+            "Sixth",
+            "Seventh",
+            "Eighth",
+            "Ninth",
+            "Tenth",
+        ]
+
+        def surname_only(name):
+            parts = name.split()
+            if len(parts) > 1 and all(part.endswith(".") for part in parts[:-1]):
+                return parts[-1]
+            return name
+
+        descriptions = []
+        for index, player_info in enumerate(similar):
+            ordinal = (
+                ordinal_labels[index]
+                if index < len(ordinal_labels)
+                else f"Number {index + 1}"
+            )
+            similarity_phrase = (
+                "the most similar player"
+                if index == 0
+                else "also similar"
+            )
+            player_name = surname_only(player_info["player"])
+
+            descriptions.append(
+                f"{ordinal} is {player_name} from {player_info['team']}, who played in the same main position over {player_info['match_count']} matches. He is {similarity_phrase} because his average KPI profile is closest to {self.player_name}'s overall profile."
+            )
+
+        return "\n\n".join(descriptions)
+
+    def _create_position_comparison_plot(self, comparison_player_names):
+        if isinstance(comparison_player_names, str):
+            comparison_player_names = [comparison_player_names]
+
+        main_pos = self.positions[0]
+        df_pos = self.stats.get_main_position_data(main_pos)
+        player_pos_df = self.player_df[self.player_df[self.stats.pos_col] == main_pos]
+        comparison_players = []
+        for comparison_player_name in comparison_player_names:
+            comparison_player_df, _, comparison_player_team = self.stats.get_player_data(
+                comparison_player_name
+            )
+            comparison_player_pos_df = comparison_player_df[
+                comparison_player_df[self.stats.pos_col] == main_pos
+            ]
+            if comparison_player_pos_df.empty:
+                continue
+
+            comparison_players.append(
+                {
+                    "name": comparison_player_name,
+                    "team": comparison_player_team,
+                    "df": comparison_player_pos_df,
+                }
+            )
+
+        return PositionVersatilityVisual().create_position_kpi_plot(
+            main_pos,
+            self.player_name,
+            df_pos,
+            player_pos_df,
+            self.player_team,
+            comparison_players=comparison_players,
+        )
+
+    def _create_player_position_plot(self, player_name):
+        player_df, positions, player_team = self.stats.get_player_data(player_name)
+        if player_df is None or not positions:
+            return None
+
+        main_pos = positions[0]
+        df_pos = self.stats.get_main_position_data(main_pos)
+        player_pos_df = player_df[player_df[self.stats.pos_col] == main_pos]
+        if player_pos_df.empty:
+            return None
+
+        return PositionVersatilityVisual().create_position_kpi_plot(
+            main_pos,
+            player_name,
+            df_pos,
+            player_pos_df,
+            player_team,
+        )
+
+    def _get_most_different_players(self, k=3):
+        """Find players most different from the selected player based on average KPI z-score."""
+        main_pos = self.positions[0]
+        all_pos_players, profiles, player_profile = self._get_main_position_player_profiles()
+
+        if all_pos_players is None:
+            return "No data available for the main position."
+
+        if player_profile is None:
+            return f"{self.player_name} not found in {main_pos} position data."
+
+        player_average = player_profile["average_kpi_z"]
+        profiles = profiles[profiles["player_name"] != self.player_name].copy()
+        profiles["distance"] = (profiles["average_kpi_z"] - player_average).abs()
+        different = [
+            {
+                "player": row["player_name"],
+                "team": row["team_name"],
+                "distance": row["distance"],
+                "match_count": row["match_count"],
+            }
+            for _, row in profiles.sort_values("distance", ascending=False).head(k).iterrows()
+        ]
+        self._last_different_players = different
         
-        # Convert distance to similarity percentage (0-100)
-        # Using normalized metric: similarity = 100 / (1 + distance)
-        result = f"**Similar players to {self.player_name} ({main_pos}):**\n"
-        for i, player_info in enumerate(similar, 1):
-            similarity_pct = int(100 / (1 + player_info["distance"]))
-            result += f"{i}. {player_info['player']} ({player_info['team']}) – {similarity_pct}% – {player_info['match_count']} matches\n"
-        
-        return result
+        if not different:
+            return f"No different players found for {self.player_name} as a {main_pos}."
+
+        ordinal_labels = [
+            "First",
+            "Second",
+            "Third",
+            "Fourth",
+            "Fifth",
+            "Sixth",
+            "Seventh",
+            "Eighth",
+            "Ninth",
+            "Tenth",
+        ]
+
+        def surname_only(name):
+            parts = name.split()
+            if len(parts) > 1 and all(part.endswith(".") for part in parts[:-1]):
+                return parts[-1]
+            return name
+
+        descriptions = []
+        for index, player_info in enumerate(different):
+            ordinal = (
+                ordinal_labels[index]
+                if index < len(ordinal_labels)
+                else f"Number {index + 1}"
+            )
+            difference_phrase = (
+                "the most different player"
+                if index == 0
+                else "also very different"
+            )
+            player_name = surname_only(player_info["player"])
+
+            descriptions.append(
+                f"{ordinal} is {player_name} from {player_info['team']}, who played in the same main position over {player_info['match_count']} matches. He is {difference_phrase} because his average KPI profile is furthest from {self.player_name}'s overall profile."
+            )
+
+        return "\n\n".join(descriptions)
 
     def _search_profile(self, criteria):
         """Search for players matching specific versatility profiles."""
         main_pos = self.positions[0]
-        pos_data = self.stats.get_position_data(main_pos)
+        pos_data = self.stats.get_main_position_data(main_pos)
         
         criteria_lower = criteria.lower()
         matches = []
@@ -864,6 +1055,7 @@ class PositionVersatilityChat(Chat):
                 })
         
         matches = sorted(matches, key=lambda x: x["score"], reverse=True)[:10]
+        self._last_profile_matches = matches
         
         if not matches:
             result = f"No players matching '{criteria}' found in {main_pos} position."
@@ -893,6 +1085,104 @@ class PositionVersatilityChat(Chat):
             
             return "I can answer questions about positions, versatility, and how players are analyzed using positional data."
 
+    def _query_summary(self, question):
+        """Answer questions by prompting over the player's summary and KPI z-values."""
+        summary_text = self._get_player_versatility_summary()
+        z_columns = [f"{kpi}_z" for kpi in self.stats.kpi_columns]
+        available_z_columns = [
+            column for column in z_columns if column in self.player_df.columns
+        ]
+        kpi_context = "No KPI z-values are available for this player."
+        main_position = self.positions[0]
+        main_position_df = self.player_df[
+            self.player_df[self.stats.pos_col] == main_position
+        ]
+
+        if available_z_columns and not main_position_df.empty:
+            mean_z_values = main_position_df[available_z_columns].mean()
+            kpi_values = [
+                f"{column.removesuffix('_z')}: {value:.2f}"
+                for column, value in mean_z_values.items()
+                if pd.notna(value)
+            ]
+            if kpi_values:
+                kpi_context = (
+                    f"{main_position} ({len(main_position_df)} matches): "
+                    + "; ".join(kpi_values)
+                )
+
+        def fallback_answer():
+            question_lower = question.lower()
+            asks_versatility = (
+                "versatile" in question_lower or "versatility" in question_lower
+            )
+            if not asks_versatility or not available_z_columns:
+                return "I could not find that information in the player summary."
+
+            in_col = "in_possession_versatility_z"
+            out_col = "out_of_possession_versatility_z"
+            if (
+                main_position_df.empty
+                or in_col not in main_position_df.columns
+                or out_col not in main_position_df.columns
+            ):
+                return "I could not find that information in the player summary."
+
+            in_value = main_position_df[in_col].mean()
+            out_value = main_position_df[out_col].mean()
+            if pd.isna(in_value) or pd.isna(out_value):
+                return "I could not find that information in the player summary."
+
+            if in_value < 0 and out_value < 0:
+                return f"As a {main_position}, {self.player_name} appears less versatile than other players in the same position both in possession and out of possession."
+            if in_value > 0 and out_value > 0:
+                return f"As a {main_position}, {self.player_name} appears more versatile than other players in the same position both in possession and out of possession."
+            if in_value > 0 and out_value < 0:
+                return f"As a {main_position}, {self.player_name} appears more versatile than positional peers in possession, but less versatile out of possession."
+
+            return f"As a {main_position}, {self.player_name} appears less versatile than positional peers in possession, but more versatile out of possession."
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You must answer using only the supplied player summary and internal KPI comparison values. "
+                    "For questions about how versatile the player is, use the in_possession_versatility and out_of_possession_versatility comparison values. "
+                    "If those two versatility comparison values are available, always answer using them and do not say the answer is missing. "
+                    "Interpret the comparison values in relation to other players in the same position: positive means above the position average, negative means below the position average, and values near 0 mean around the position average. "
+                    "In your answer, do not report exact comparison values and do not use the term z-value. "
+                    "Do not use outside knowledge, do not infer beyond the supplied context, and do not add new facts. "
+                    "Write one cohesive, concise paragraph with no bullet points, no headings, and no markdown. "
+                    "Only if the answer is not present in either the player summary or internal KPI comparison values, reply exactly: "
+                    "I could not find that information in the player summary."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Player summary:\n```{summary_text}```\n\n"
+                    f"Internal KPI comparison values for the main position:\n```{kpi_context}```\n\n"
+                    f"Question:\n```{question}```"
+                ),
+            },
+        ]
+
+        client = OpenAI(api_key=GPT_KEY, base_url=GPT_BASE)
+        response_kwargs = {
+            "model": GPT_CHAT_MODEL,
+            "input": messages,
+            "max_output_tokens": 160,
+        }
+        if GPT_SUPPORTS_TEMPERATURE:
+            response_kwargs["temperature"] = 0
+
+        response = client.responses.create(**response_kwargs)
+        answer = response.output_text.strip()
+        if not answer:
+            return fallback_answer()
+
+        return answer
+
     def get_input(self):
         """Get input from streamlit."""
         if x := st.chat_input(
@@ -918,7 +1208,9 @@ class PositionVersatilityChat(Chat):
                     "COPY THE TOOL RESULT VERBATIM AND NOTHING ELSE. "
                     "Choose the tool that best fits the user's query. "
                     "- If the user asks for a summary or overview of the player, use get_player_versatility_summary. "
-                    "- If the user asks for similar players or comparisons, use get_similar_players. "
+                    "- If the user asks for similar or comparable players, use get_similar_players and preserve one explanation line per player; do not collapse the answer into a list of names. "
+                    "- If the user asks for different or contrasting players, use get_most_different_players. "
+                    "- If the user asks you to summarize or extract specific information from the player data, use query_summary. "
                     "- If the user asks for players matching specific profiles, use search_profile. "
                     "- If the user asks for general football knowledge or definitions, use search_football_knowledge. "
                     "All user messages will be prefixed with 'User:' and enclosed with ```."
@@ -933,126 +1225,160 @@ class PositionVersatilityChat(Chat):
             return
         
         # OpenAI function-calling path
-        messages = self.instruction_messages()
-        messages = messages + self.messages_to_display.copy()
-        messages = [m for m in messages if isinstance(m["content"], str)]
-        messages.append({"role": "user", "content": f"```User: {input}```"})
+        with st.spinner("Processing your question..."):
+            messages = self.instruction_messages()
+            messages = messages + self.messages_to_display.copy()
+            messages = [m for m in messages if isinstance(m["content"], str)]
+            messages.append({"role": "user", "content": f"```User: {input}```"})
 
-        self.messages_to_display.append({"role": "user", "content": input})
+            self.messages_to_display.append({"role": "user", "content": input})
 
-        client = OpenAI(api_key=GPT_KEY, base_url=GPT_BASE)
+            client = OpenAI(api_key=GPT_KEY, base_url=GPT_BASE)
 
-        # Call 1: model picks a tool if relevant, or answers directly if not
-        r1 = client.responses.create(
-            model=GPT_CHAT_MODEL,
-            input=messages,
-            tools=self.tools,
-            tool_choice="auto",
-        )
-        fc = next((item for item in r1.output if item.type == "function_call"), None)
-
-        if fc is None:
-            # Model decided no tool was needed — use its response directly
-            st.expander("Chat transcript", expanded=False).write(
-                [{"role": m.get("role"), "content": m.get("content", "")} for m in messages if isinstance(m, dict)]
+            # Call 1: model picks a tool if relevant, or answers directly if not
+            r1 = client.responses.create(
+                model=GPT_CHAT_MODEL,
+                input=messages,
+                tools=self.tools,
+                tool_choice="auto",
             )
-            self.messages_to_display.append({"role": "assistant", "content": r1.output_text})
-            return
+            fc = next((item for item in r1.output if item.type == "function_call"), None)
 
-        # Execute the appropriate tool
-        if fc.name == "get_player_versatility_summary":
-            result = self._get_player_versatility_summary()
-        elif fc.name == "get_similar_players":
-            k = json.loads(fc.arguments).get("k", 5)
-            result = self._get_similar_players(k)
-        elif fc.name == "search_profile":
-            criteria = json.loads(fc.arguments)["criteria"]
-            result = self._search_profile(criteria)
-        else:  # search_football_knowledge
-            query = json.loads(fc.arguments)["query"]
-            result = self._search_knowledge(query)
+            if fc is None:
+                # Model decided no tool was needed — use its response directly
+                st.expander("Chat transcript", expanded=False).write(
+                    [{"role": m.get("role"), "content": m.get("content", "")} for m in messages if isinstance(m, dict)]
+                )
+                self.messages_to_display.append({"role": "assistant", "content": r1.output_text})
+                return
 
-        # Call 2: final answer, no more tools
-        tool_inputs = list(messages) + list(r1.output) + [
-            {"type": "function_call_output", "call_id": fc.call_id, "output": result}
-        ]
+            # Execute the appropriate tool
+            if fc.name == "get_player_versatility_summary":
+                result = self._get_player_versatility_summary()
+            elif fc.name == "get_similar_players":
+                k = json.loads(fc.arguments).get("k", 3)
+                result = self._get_similar_players(k)
+                self.messages_to_display.append({"role": "assistant", "content": result})
+                self.messages_to_display.append(
+                    {
+                        "role": "assistant",
+                        "content": self._create_position_comparison_plot(
+                            [player_info["player"] for player_info in self._last_similar_players]
+                        ),
+                    }
+                )
+                return
+            elif fc.name == "get_most_different_players":
+                k = json.loads(fc.arguments).get("k", 3)
+                result = self._get_most_different_players(k)
+                self.messages_to_display.append({"role": "assistant", "content": result})
+                self.messages_to_display.append(
+                    {
+                        "role": "assistant",
+                        "content": self._create_position_comparison_plot(
+                            [player_info["player"] for player_info in self._last_different_players]
+                        ),
+                    }
+                )
+                return
+            elif fc.name == "search_profile":
+                criteria = json.loads(fc.arguments)["criteria"]
+                result = self._search_profile(criteria)
+                self.messages_to_display.append({"role": "assistant", "content": result})
+                if self._last_profile_matches:
+                    top_match = self._last_profile_matches[0]["player"]
+                    plot = self._create_player_position_plot(top_match)
+                    if plot is not None:
+                        self.messages_to_display.append({"role": "assistant", "content": plot})
+                return
+            elif fc.name == "query_summary":
+                question = json.loads(fc.arguments)["question"]
+                result = self._query_summary(question)
+            else:  # search_football_knowledge
+                query = json.loads(fc.arguments)["query"]
+                result = self._search_knowledge(query)
 
-        formatted = []
-        for item in tool_inputs:
-            if isinstance(item, dict):
-                if item.get("type") == "function_call_output":
-                    formatted.append({"tool_result": item["output"] or "(empty)", "call_id": item["call_id"]})
+            # Call 2: final answer, no more tools
+            tool_inputs = list(messages) + list(r1.output) + [
+                {"type": "function_call_output", "call_id": fc.call_id, "output": result}
+            ]
+
+            formatted = []
+            for item in tool_inputs:
+                if isinstance(item, dict):
+                    if item.get("type") == "function_call_output":
+                        formatted.append({"tool_result": item["output"] or "(empty)", "call_id": item["call_id"]})
+                    else:
+                        formatted.append({"role": item.get("role"), "content": item.get("content", "")})
+                elif hasattr(item, "type"):
+                    if item.type == "function_call":
+                        formatted.append({"tool_call": item.name, "arguments": json.loads(item.arguments)})
+            
+            st.expander("Chat transcript", expanded=False).write(formatted)
+            
+            if stream:
+                if GPT_SUPPORTS_REASONING:
+                    reasoning_effort = reasoning_effort if reasoning_effort in GPT_AVAILABLE_REASONING_EFFORTS else GPT_AVAILABLE_REASONING_EFFORTS[0]
+                    response_stream = client.responses.create(
+                        model=GPT_CHAT_MODEL,
+                        input=tool_inputs,
+                        tool_choice="none",
+                        tools=self.tools,
+                        reasoning={"effort": reasoning_effort},
+                        stream=True,
+                    )
+                elif GPT_SUPPORTS_TEMPERATURE:
+                    response_stream = client.responses.create(
+                        model=GPT_CHAT_MODEL,
+                        input=tool_inputs,
+                        tool_choice="none",
+                        tools=self.tools,
+                        temperature=temperature,
+                        stream=True,
+                    )
                 else:
-                    formatted.append({"role": item.get("role"), "content": item.get("content", "")})
-            elif hasattr(item, "type"):
-                if item.type == "function_call":
-                    formatted.append({"tool_call": item.name, "arguments": json.loads(item.arguments)})
-        
-        st.expander("Chat transcript", expanded=False).write(formatted)
-        
-        if stream:
-            if GPT_SUPPORTS_REASONING:
-                reasoning_effort = reasoning_effort if reasoning_effort in GPT_AVAILABLE_REASONING_EFFORTS else GPT_AVAILABLE_REASONING_EFFORTS[0]
-                response_stream = client.responses.create(
-                    model=GPT_CHAT_MODEL,
-                    input=tool_inputs,
-                    tool_choice="none",
-                    tools=self.tools,
-                    reasoning={"effort": reasoning_effort},
-                    stream=True,
-                )
-            elif GPT_SUPPORTS_TEMPERATURE:
-                response_stream = client.responses.create(
-                    model=GPT_CHAT_MODEL,
-                    input=tool_inputs,
-                    tool_choice="none",
-                    tools=self.tools,
-                    temperature=temperature,
-                    stream=True,
-                )
+                    response_stream = client.responses.create(
+                        model=GPT_CHAT_MODEL,
+                        input=tool_inputs,
+                        tool_choice="none",
+                        tools=self.tools,
+                        stream=True,
+                    )
+
+                def streamed_chunks():
+                    for event in response_stream:
+                        if event.type == "response.output_text.delta":
+                            yield event.delta
+
+                answer = streamed_chunks()
             else:
-                response_stream = client.responses.create(
-                    model=GPT_CHAT_MODEL,
-                    input=tool_inputs,
-                    tool_choice="none",
-                    tools=self.tools,
-                    stream=True,
-                )
+                if GPT_SUPPORTS_REASONING:
+                    reasoning_effort = reasoning_effort if reasoning_effort in GPT_AVAILABLE_REASONING_EFFORTS else GPT_AVAILABLE_REASONING_EFFORTS[0]
+                    response = client.responses.create(
+                        model=GPT_CHAT_MODEL,
+                        input=tool_inputs,
+                        tool_choice="none",
+                        tools=self.tools,
+                        reasoning={"effort": reasoning_effort},
+                    )
+                elif GPT_SUPPORTS_TEMPERATURE:
+                    response = client.responses.create(
+                        model=GPT_CHAT_MODEL,
+                        input=tool_inputs,
+                        tool_choice="none",
+                        tools=self.tools,
+                        temperature=temperature,
+                    )
+                else:
+                    response = client.responses.create(
+                        model=GPT_CHAT_MODEL,
+                        input=tool_inputs,
+                        tool_choice="none",
+                        tools=self.tools,
+                    )
+                answer = response.output_text
 
-            def streamed_chunks():
-                for event in response_stream:
-                    if event.type == "response.output_text.delta":
-                        yield event.delta
-
-            answer = streamed_chunks()
-        else:
-            if GPT_SUPPORTS_REASONING:
-                reasoning_effort = reasoning_effort if reasoning_effort in GPT_AVAILABLE_REASONING_EFFORTS else GPT_AVAILABLE_REASONING_EFFORTS[0]
-                response = client.responses.create(
-                    model=GPT_CHAT_MODEL,
-                    input=tool_inputs,
-                    tool_choice="none",
-                    tools=self.tools,
-                    reasoning={"effort": reasoning_effort},
-                )
-            elif GPT_SUPPORTS_TEMPERATURE:
-                response = client.responses.create(
-                    model=GPT_CHAT_MODEL,
-                    input=tool_inputs,
-                    tool_choice="none",
-                    tools=self.tools,
-                    temperature=temperature,
-                )
-            else:
-                response = client.responses.create(
-                    model=GPT_CHAT_MODEL,
-                    input=tool_inputs,
-                    tool_choice="none",
-                    tools=self.tools,
-                )
-            answer = response.output_text
-
-        self.messages_to_display.append({"role": "assistant", "content": answer})
+            self.messages_to_display.append({"role": "assistant", "content": answer})
 
     def get_relevant_info(self, query):
         """Get relevant info for Gemini/LM Studio path."""

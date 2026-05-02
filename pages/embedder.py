@@ -89,7 +89,7 @@ else:
     try:
         file_format, read_func = get_format(full_path)
         df = read_func(full_path)
-        st.dataframe(df, use_container_width=True)
+        st.dataframe(df, width="stretch")
     except Exception as e:
         st.error(f"Error reading file: {str(e)}")
     

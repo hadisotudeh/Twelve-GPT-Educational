@@ -41,7 +41,10 @@ def draw_position_maps(player_df, pos_col, selected_player):
 def main():
     # ── page chrome ──────────────────────────────────────────────────────
     sidebar_container = add_common_page_elements()
-    st.divider()
+    st.markdown(
+        "<h1 style='text-align: center;'>Position Scout</h1>",
+        unsafe_allow_html=True,
+    )
 
     # ── load data ────────────────────────────────────────────────────────
     stats = PositionVersatilityStats()
@@ -58,12 +61,72 @@ def main():
             placeholder="Type to search...",
         )
 
+        st.markdown(
+            """
+            <div style="
+                margin-top: 1rem;
+                padding: 0.9rem 1rem;
+                border-radius: 14px;
+                border: 1px solid rgba(255, 255, 255, 0.14);
+                background: rgba(0, 0, 0, 0.18);
+                color: white;
+            ">
+                <div style="
+                    font-size: 0.72rem;
+                    font-weight: 700;
+                    letter-spacing: 0.14em;
+                    text-transform: uppercase;
+                    color: rgba(255, 255, 255, 0.65);
+                    margin-bottom: 0.35rem;
+                ">
+                    Developed by
+                </div>
+                <div style="font-size: 1rem; font-weight: 600; line-height: 1.4;">
+                    Hadi Sotudeh
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
     if selected_player is None:
         st.info("Select a player from the sidebar to get started.")
         st.stop()
 
     # ── get player data ──────────────────────────────────────────────────
     player_df, positions, player_team = stats.get_player_data(selected_player)
+
+    st.markdown(
+        """
+        <div style="
+            margin: 0.75rem auto 1.25rem;
+            padding: 1rem 1.25rem;
+            max-width: 52rem;
+            border: 1px solid rgba(0, 145, 65, 0.25);
+            border-radius: 16px;
+            background: linear-gradient(180deg, rgba(0, 44, 28, 0.96), rgba(0, 44, 28, 0.84));
+            color: white;
+            box-shadow: 0 12px 30px rgba(0, 0, 0, 0.12);
+        ">
+            <div style="
+                font-size: 0.78rem;
+                font-weight: 700;
+                letter-spacing: 0.14em;
+                text-transform: uppercase;
+                color: rgba(255, 255, 255, 0.7);
+                margin-bottom: 0.4rem;
+            ">
+                What can you ask?
+            </div>
+            <div style="font-size: 1rem; line-height: 1.6;">
+                Ask for similar players, the most different players, profiles that match a
+                specific versatility pattern, questions about football positions and
+                versatility, or anything about the player's positional data.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     if player_df is None:
         st.error(f"Player {selected_player} not found.")
@@ -72,10 +135,6 @@ def main():
     # ── Get main (most frequent) position ────────────────────────────────
     main_pos = positions[0]  # positions are sorted by frequency (value_counts)
     main_positions = [main_pos]
-
-    # ── KPI definitions in one clean dropdown ────────────────────────────
-    with st.expander("KPI definitions", expanded=False):
-        st.markdown(visual.get_kpi_definitions())
 
     # Show the versatility analysis context — persists across chat turns via session state
     if "description_transcript" in st.session_state:
@@ -91,7 +150,7 @@ def main():
     # Now we want to add basic content to chat if it's empty
     if chat.state == "empty":
         # Generate the distribution plot for the main position
-        df_pos = stats.get_position_data(main_pos)
+        df_pos = stats.get_main_position_data(main_pos)
         player_pos_df = player_df[player_df[stats.pos_col] == main_pos]
 
         fig = visual.create_position_kpi_plot(
@@ -119,14 +178,16 @@ def main():
         )
         chat.add_message(fig)
         chat.add_message(summary)
-
         chat.state = "default"
+
+    # ── KPI definitions in one clean dropdown ────────────────────────────
+    with st.expander("KPI definitions", expanded=False):
+        st.markdown(visual.get_kpi_definitions())
 
     # Now we want to get the user input, display the messages and save the state
     chat.get_input()
     chat.display_messages()
     chat.save_state()
-
 
 if __name__ == "__main__":
     main()

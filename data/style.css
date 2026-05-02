@@ -12,6 +12,10 @@ div[data-testid="stToolbar"] {
     display: none;
 }
 
+div[data-testid="stSidebarNav"] {
+    display: none;
+}
+
 div[data-testid="stSidebarContent"]::-webkit-scrollbar {
     width: 10px;
 }
@@ -170,6 +174,16 @@ div[data-testid="stForm"] {
 
 div[data-testid="stChatInput"]>div {
     background-color: #ffffff;
+}
+
+div[data-testid="stChatInput"] div[data-baseweb="textarea"],
+div[data-testid="stChatInput"] textarea {
+    background-color: #ffffff;
+    color: #111111;
+}
+
+div[data-testid="stChatInput"] textarea::placeholder {
+    color: #6b7280;
 }
 
 div[data-testid="stTextInput"] {

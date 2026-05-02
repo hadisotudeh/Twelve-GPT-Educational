@@ -83,7 +83,7 @@ class Visual:
             self.fig,
             config={"displayModeBar": False},
             height=500,
-            use_container_width=True,
+            width="stretch",
         )
 
     def _setup_styles(self):
@@ -158,7 +158,7 @@ class Visual:
             self.fig,
             config={"displayModeBar": False},
             height=500,
-            use_container_width=True,
+            width="stretch",
         )
 
     def close(self):
@@ -603,18 +603,18 @@ class PositionVersatilityVisual(Visual):
         fig.update_layout(
             autosize=True,
             height=height,
-            margin=dict(l=60, r=60, b=70, t=75, pad=16),
+            margin=dict(l=60, r=170, b=70, t=90, pad=16),
             paper_bgcolor=self.DARK_GREEN,
             plot_bgcolor=self.DARK_GREEN,
             legend=dict(
-                orientation="h",
+                orientation="v",
                 font=dict(color=self.WHITE.format(a=1), family=self.FONT_BODY, size=11),
                 itemclick=False,
                 itemdoubleclick=False,
-                x=0.5,
-                xanchor="center",
-                y=-0.2,
-                yanchor="bottom",
+                x=1.02,
+                xanchor="left",
+                y=1,
+                yanchor="top",
                 valign="middle",
             ),
             xaxis=dict(
@@ -638,24 +638,62 @@ class PositionVersatilityVisual(Visual):
             ),
         )
 
+    def _position_group_label(self, position):
+        position_labels = {
+            "AM": "attacking midfielders",
+            "CB": "centre backs",
+            "CF": "centre forwards",
+            "DM": "defensive midfielders",
+            "LB": "left backs",
+            "LCB": "left centre backs",
+            "LDM": "left defensive midfielders",
+            "LF": "left forwards",
+            "LM": "left midfielders",
+            "LW": "left wingers",
+            "LWB": "left wing backs",
+            "RB": "right backs",
+            "RCB": "right centre backs",
+            "RDM": "right defensive midfielders",
+            "RF": "right forwards",
+            "RM": "right midfielders",
+            "RW": "right wingers",
+            "RWB": "right wing backs",
+        }
+        return position_labels.get(position, f"{position} players")
+
     def create_position_kpi_plot(
-        self, position: str, player_name: str, df_pos: pd.DataFrame, player_pos_df: pd.DataFrame, player_team: str
+        self,
+        position: str,
+        player_name: str,
+        df_pos: pd.DataFrame,
+        player_pos_df: pd.DataFrame,
+        player_team: str,
+        comparison_player_name: str = None,
+        comparison_player_pos_df: pd.DataFrame = None,
+        comparison_player_team: str = None,
+        comparison_players: list = None,
     ):
         """
         Create KPI distribution plot for a position comparing selected player to peers.
         """
         self.fig = go.Figure()
 
+        z_columns = [f"{k}_z" for k in self.kpi_columns]
+        plot_columns = z_columns + ["average_kpi_z"]
+        plot_labels = [self.kpi_label_map[kpi] for kpi in self.kpi_columns] + [
+            "Average KPI z-score"
+        ]
+
         # Aggregate to one dot per player (mean z-score within this position)
-        df_agg = df_pos.groupby("player_name", as_index=False)[
-            [f"{k}_z" for k in self.kpi_columns]
-        ].mean()
+        df_agg = df_pos.groupby("player_name", as_index=False)[z_columns].mean()
+        df_agg["average_kpi_z"] = df_agg[z_columns].mean(axis=1)
 
         # Other players by KPI row
+        other_players_label = f"Other {self._position_group_label(position)}  "
         showlegend_group = True
-        for i, kpi in enumerate(self.kpi_columns):
-            z_col = f"{kpi}_z"
-            kpi_label = self.kpi_label_map[kpi]
+        for i, z_col in enumerate(plot_columns):
+            kpi_label = plot_labels[i]
+            value_label = "score" if z_col == "average_kpi_z" else "z"
             self.fig.add_trace(
                 go.Scatter(
                     x=df_agg[z_col].tolist(),
@@ -668,19 +706,20 @@ class PositionVersatilityVisual(Visual):
                         line_color=self.BRIGHT_GREEN.format(a=1),
                     ),
                     text=df_agg["player_name"],
-                    hovertemplate="%{text}<br>" + kpi_label + " z: %{x:.2f}<extra></extra>",
-                    name="Other players  ",
+                    hovertemplate="%{text}<br>" + kpi_label + f" {value_label}: " + "%{x:.2f}<extra></extra>",
+                    name=other_players_label,
                     showlegend=showlegend_group,
                 )
             )
             showlegend_group = False
 
         # Selected player marker per KPI
-        player_agg = player_pos_df[[f"{k}_z" for k in self.kpi_columns]].mean()
+        player_agg = player_pos_df[z_columns].mean()
+        player_agg["average_kpi_z"] = player_agg[z_columns].mean()
         showlegend_player = True
-        for i, kpi in enumerate(self.kpi_columns):
-            z_col = f"{kpi}_z"
-            kpi_label = self.kpi_label_map[kpi]
+        for i, z_col in enumerate(plot_columns):
+            kpi_label = plot_labels[i]
+            value_label = "score" if z_col == "average_kpi_z" else "z"
             self.fig.add_trace(
                 go.Scatter(
                     x=[player_agg[z_col]],
@@ -694,29 +733,95 @@ class PositionVersatilityVisual(Visual):
                         line_color=self.WHITE.format(a=1),
                     ),
                     text=[player_name],
-                    hovertemplate="%{text}<br>" + kpi_label + " z: %{x:.2f}<extra></extra>",
+                    hovertemplate="%{text}<br>" + kpi_label + f" {value_label}: " + "%{x:.2f}<extra></extra>",
                     name=player_name,
                     showlegend=showlegend_player,
                 )
             )
             showlegend_player = False
 
-        self._base_layout(self.fig, height=max(360, len(self.kpi_columns) * 70))
+        if comparison_players is None:
+            comparison_players = []
+            if (
+                comparison_player_name
+                and comparison_player_pos_df is not None
+                and not comparison_player_pos_df.empty
+            ):
+                comparison_players.append(
+                    {
+                        "name": comparison_player_name,
+                        "team": comparison_player_team,
+                        "df": comparison_player_pos_df,
+                    }
+                )
+
+        comparison_colors = [
+            self.BRIGHT_YELLOW,
+            "rgba(0,149,255,{a})",
+            "rgba(255,75,0,{a})",
+            "rgba(255,255,255,{a})",
+            self.BRIGHT_GREEN,
+        ]
+        comparison_symbols = ["diamond", "circle", "triangle-up", "x", "star"]
+
+        # Optional comparison player markers per KPI
+        for comparison_index, comparison_player in enumerate(comparison_players):
+            comparison_df = comparison_player["df"]
+            if comparison_df is None or comparison_df.empty:
+                continue
+
+            comparison_name = comparison_player["name"]
+            comparison_agg = comparison_df[z_columns].mean()
+            comparison_agg["average_kpi_z"] = comparison_agg[z_columns].mean()
+            comparison_color = comparison_colors[
+                comparison_index % len(comparison_colors)
+            ]
+            comparison_symbol = comparison_symbols[
+                comparison_index % len(comparison_symbols)
+            ]
+            showlegend_comparison = True
+            for i, z_col in enumerate(plot_columns):
+                kpi_label = plot_labels[i]
+                value_label = "score" if z_col == "average_kpi_z" else "z"
+                self.fig.add_trace(
+                    go.Scatter(
+                        x=[comparison_agg[z_col]],
+                        y=[i],
+                        mode="markers",
+                        marker=dict(
+                            color=comparison_color.format(a=0.65),
+                            size=11,
+                            symbol=comparison_symbol,
+                            line_width=1.5,
+                            line_color=comparison_color.format(a=1),
+                        ),
+                        text=[comparison_name],
+                        hovertemplate="%{text}<br>" + kpi_label + f" {value_label}: " + "%{x:.2f}<extra></extra>",
+                        name=comparison_name,
+                        showlegend=showlegend_comparison,
+                    )
+                )
+                showlegend_comparison = False
+
+        self._base_layout(self.fig, height=max(420, len(plot_columns) * 70))
 
         n_matches = len(player_pos_df)
         suffix = "match" if n_matches == 1 else "matches"
-        self._add_title(
-            self.fig,
-            f"{player_name} at {position} – KPI distribution (z-scores)",
-            f"{player_team} · {n_matches} {suffix} in this position",
-        )
+        if comparison_players:
+            comparison_names = ", ".join(
+                comparison_player["name"] for comparison_player in comparison_players
+            )
+            title = f"{player_name} vs comparisons at {position}"
+            subtitle = f"{player_team} · {n_matches} {suffix} | {comparison_names}"
+        else:
+            title = f"{player_name} at {position} – KPI distribution (z-scores)"
+            subtitle = f"{player_team} · {n_matches} {suffix} in this position"
 
-        all_z = df_pos[[f"{k}_z" for k in self.kpi_columns]].stack().dropna()
-        x_min = max(all_z.min() - 0.5, -3)
-        x_max = min(all_z.max() + 0.5, 3)
+        self._add_title(self.fig, title, subtitle)
+
         self.fig.update_xaxes(
-            range=[x_min, x_max],
-            fixedrange=True,
+            autorange=True,
+            fixedrange=False,
             title=dict(
                 text="Lower relative to position peers     ·     z-score     ·     Higher relative to position peers",
                 font=dict(color=self.WHITE.format(a=0.6), family=self.FONT_BODY, size=11),
@@ -724,8 +829,8 @@ class PositionVersatilityVisual(Visual):
         )
         self.fig.update_yaxes(
             tickmode="array",
-            tickvals=list(range(len(self.kpi_columns))),
-            ticktext=[self.kpi_label_map[kpi] for kpi in self.kpi_columns],
+            tickvals=list(range(len(plot_columns))),
+            ticktext=plot_labels,
             fixedrange=True,
             gridcolor=self.MEDIUM_GREEN,
             zerolinecolor=self.MEDIUM_GREEN,
@@ -735,10 +840,38 @@ class PositionVersatilityVisual(Visual):
             x0=0,
             y0=-0.5,
             x1=0,
-            y1=len(self.kpi_columns) - 0.5,
+            y1=len(plot_columns) - 0.5,
             line=dict(color="gray", width=1, dash="dot"),
         )
 
+        # Add horizontal separator lines between specific KPI rows
+        # Separator between out-of-possession versatility and in-possession lateral COG (y = 2.5)
+        # This sits between index 2 (in_possession_lateral_center_of_gravity) and index 3 (out_of_possession_versatility)
+        if len(plot_columns) >= 4:
+            self.fig.add_shape(
+                type="line",
+                xref="paper",
+                x0=0,
+                x1=1,
+                yref="y",
+                y0=2.5,
+                y1=2.5,
+                line=dict(color="rgba(255,255,255,0.12)", width=1, dash="dot"),
+            )
+
+        # Separator between out-of-possession lateral COG and Average KPI (y = 5.5)
+        # This sits between index 5 (out_of_possession_lateral_center_of_gravity) and index 6 (average_kpi_z)
+        if len(plot_columns) >= 7:
+            self.fig.add_shape(
+                type="line",
+                xref="paper",
+                x0=0,
+                x1=1,
+                yref="y",
+                y0=5.5,
+                y1=5.5,
+                line=dict(color="rgba(255,255,255,0.12)", width=1, dash="dot"),
+            )
         return self
 
     def get_kpi_definitions(self) -> str:

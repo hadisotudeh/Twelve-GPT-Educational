@@ -630,3 +630,14 @@ class PositionVersatilityStats(Data):
     def get_position_data(self, position: str) -> pd.DataFrame:
         """Get all players' data for a specific position."""
         return self.df[self.df[self.pos_col] == position]
+
+    def get_main_position_data(self, position: str) -> pd.DataFrame:
+        """Get rows for players whose most frequent position is the given position."""
+        main_positions = self.df.groupby("player_name")[self.pos_col].agg(
+            lambda positions: positions.value_counts().index[0]
+        )
+        player_names = main_positions[main_positions == position].index
+        return self.df[
+            (self.df["player_name"].isin(player_names))
+            & (self.df[self.pos_col] == position)
+        ]
