@@ -880,50 +880,60 @@ class PositionVersatilityVisual(Visual):
             "in_possession_versatility": r"""
 **In-possession versatility** measures how broadly a player occupies different zones while their team has the ball.
 
-| z-score | Interpretation |
+| Range | Interpretation |
 |---|---|
-| **z > 0** | More varied attacking positioning than peers in the same role |
-| **z < 0** | More specialized attacking positioning than peers in the same role |
+| **z > 0.5** | Appears in a broad range of tactical positions in possession |
+| **z < -0.5** | Focused on specific tactical positions in possession |
+| **-0.5 ≤ z ≤ 0.5** | Shows typical in-possession variety for this role |
 """,
             "in_possession_vertical_center_of_gravity": r"""
 **In-possession vertical COG** is the average attacking depth of a player when their team has the ball.
 
-| z-score | Interpretation |
+| Range | Interpretation |
 |---|---|
-| **z > 0** | Operates higher up the pitch in possession than peers |
-| **z < 0** | Operates deeper in possession than peers |
+| **z > 0.5** | Appears in higher tactical positions when in possession |
+| **z < -0.5** | Operates deeper in possession |
+| **-0.5 ≤ z ≤ 0.5** | Holds typical in-possession depth |
 """,
             "in_possession_lateral_center_of_gravity": r"""
 **In-possession lateral COG** is the average left-right attacking lane when their team has the ball.
 
-| z-score | Interpretation |
+| Range | Interpretation |
 |---|---|
-| **z > 0** | Favors right-sided attacking zones versus peers |
-| **z < 0** | Favors left-sided attacking zones versus peers |
+| **z > 1** | Leans strongly to the right in possession |
+| **0.3 < z ≤ 1** | Favors the right lane in possession |
+| **-0.3 ≤ z ≤ 0.3** | Laterally balanced in possession |
+| **-1 ≤ z < -0.3** | Favors the left lane in possession |
+| **z < -1** | Leans strongly to the left in possession |
 """,
             "out_of_possession_versatility": r"""
 **Out-of-possession versatility** measures how broadly a player covers zones while defending.
 
-| z-score | Interpretation |
+| Range | Interpretation |
 |---|---|
-| **z > 0** | Defends across more zones than peers in the same role |
-| **z < 0** | Defends in a more fixed structure than peers |
+| **z > 0.5** | Covers many tactical positions when out of possession |
+| **z < -0.5** | Focused on specific tactical positions when out of possession |
+| **-0.5 ≤ z ≤ 0.5** | Shows typical out-of-possession coverage |
 """,
             "out_of_possession_vertical_center_of_gravity": r"""
 **Out-of-possession vertical COG** is the average defensive depth when the team does not have the ball.
 
-| z-score | Interpretation |
+| Range | Interpretation |
 |---|---|
-| **z > 0** | Defends higher up the pitch than peers |
-| **z < 0** | Defends deeper than peers |
+| **z > 0.5** | Defends relatively high |
+| **z < -0.5** | Defends from deeper positions |
+| **-0.5 ≤ z ≤ 0.5** | Keeps typical defensive depth |
 """,
             "out_of_possession_lateral_center_of_gravity": r"""
 **Out-of-possession lateral COG** is the average left-right defensive lane while out of possession.
 
-| z-score | Interpretation |
+| Range | Interpretation |
 |---|---|
-| **z > 0** | Defensive activity is shifted to the right side versus peers |
-| **z < 0** | Defensive activity is shifted to the left side versus peers |
+| **z > 1** | Defends predominantly on the right side |
+| **0.3 < z ≤ 1** | Defends slightly right of center |
+| **-0.3 ≤ z ≤ 0.3** | Defends with central lateral balance |
+| **-1 ≤ z < -0.3** | Defends slightly left of center |
+| **z < -1** | Defends predominantly on the left side |
 """,
         }
 

@@ -8,8 +8,12 @@
     src: replace_font_url_light format("truetype");
 }
 
-div[data-testid="stToolbar"] { 
-    display: none;
+div[data-testid="stToolbar"] {
+    display: flex;
+}
+
+button[data-testid="stDeployButton"] {
+    display: inline-flex !important;
 }
 
 div[data-testid="stSidebarNav"] {

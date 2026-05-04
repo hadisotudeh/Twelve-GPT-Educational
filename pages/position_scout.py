@@ -121,7 +121,7 @@ def main():
             <div style="font-size: 1rem; line-height: 1.6;">
                 Ask for similar players, the most different players, profiles that match a
                 specific versatility pattern, questions about football positions and
-                versatility, or anything about the player's positional data.
+                versatility, position maps, or anything about the player's positional data.
             </div>
         </div>
         """,

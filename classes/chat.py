@@ -5,6 +5,11 @@ from types import GeneratorType
 import pandas as pd
 import numpy as np
 import json
+import ast
+import re
+from datetime import datetime
+
+import fitz
 
 from settings import USE_GEMINI, USE_LM_STUDIO
 
@@ -39,6 +44,38 @@ from classes.visual import (
 
 import utils.sentences as sentences
 from utils.gemini import convert_messages_format
+
+
+class PositionMapPages:
+    def __init__(self, pdf_path, pages):
+        self.pdf_path = pdf_path
+        self.pages = pages
+
+    def show(self):
+        if not self.pages:
+            st.info("No matching position map pages were found.")
+            return
+        # If page entries already contain rendered images, use them directly
+        if all(isinstance(p, dict) and p.get("img_bytes") for p in self.pages):
+            for index, page_info in enumerate(self.pages):
+                if index > 0:
+                    st.divider()
+                st.image(page_info["img_bytes"], width="stretch")
+            return
+
+        # Fallback: render pages from the PDF (keeps backward compatibility)
+        doc = fitz.open(self.pdf_path)
+        try:
+            for index, page_info in enumerate(self.pages):
+                if index > 0:
+                    st.divider()
+
+                page = doc.load_page(page_info["page_number"] - 1)
+                pix = page.get_pixmap(dpi=72)
+                img_bytes = pix.tobytes("png")
+                st.image(img_bytes, width="stretch")
+        finally:
+            doc.close()
 
 
 class Chat:
@@ -750,6 +787,18 @@ class PositionVersatilityChat(Chat):
                 "required": ["question"],
             },
         },
+        {
+            "type": "function",
+            "name": "get_position_maps",
+            "description": "Renders the matching position map pages from players.pdf for the selected player when the player name matches and the Skillcorner position matches the player's main position.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+        {
+            "type": "function",
+            "name": "get_outlier_position_maps",
+            "description": "Renders only the position map pages that are outliers versus the selected player's main-position profile, using the player_versatility.csv position_profile column and keeping the comparison on the player's main position.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
     ]
 
     def __init__(self, chat_state_hash, player_name, stats, state="empty"):
@@ -1183,6 +1232,265 @@ class PositionVersatilityChat(Chat):
 
         return answer
 
+    def _get_position_maps(self):
+        """Return the players.pdf pages that match the selected player's name and main position."""
+        main_position = self.positions[0]
+        player_name = self.player_name.casefold().strip()
+        main_position_norm = main_position.casefold().strip()
+        matches = []
+
+        doc = fitz.open("data/position_maps/players.pdf")
+        try:
+            for page_number, page in enumerate(doc, start=1):
+                text = page.get_text("text") or ""
+                normalized_text = text.casefold()
+
+                if player_name not in normalized_text:
+                    continue
+
+                skillcorner_match = re.search(
+                    r"skillcorner\s*[:\-]\s*([A-Z]{1,4})",
+                    text,
+                    flags=re.IGNORECASE,
+                )
+                if skillcorner_match is None:
+                    skillcorner_match = re.search(
+                        r"skillcorner\s*position\s*[:\-]\s*([A-Z]{1,4})",
+                        text,
+                        flags=re.IGNORECASE,
+                    )
+
+                if skillcorner_match is None:
+                    continue
+
+                skillcorner_position = skillcorner_match.group(1).strip()
+                if skillcorner_position.casefold() != main_position_norm:
+                    continue
+
+                date_match = re.search(r"\b\d{4}-\d{2}-\d{2}\b", text)
+                if date_match is None:
+                    continue
+
+                # Render the page once (lower DPI for speed) and store bytes to avoid reopening
+                try:
+                    pix = page.get_pixmap(dpi=72)
+                    img_bytes = pix.tobytes("png")
+                except Exception:
+                    img_bytes = None
+
+                matches.append(
+                    {
+                        "page_number": page_number,
+                        "match_date": datetime.strptime(
+                            date_match.group(0), "%Y-%m-%d"
+                        ).date(),
+                        "img_bytes": img_bytes,
+                    }
+                )
+        finally:
+            doc.close()
+
+        if not matches:
+            return (
+                f"No position map pages found for {self.player_name} where the Skillcorner position matches the main position ({main_position})."
+            )
+
+        matches.sort(key=lambda item: (item["match_date"], item["page_number"]))
+        return PositionMapPages("data/position_maps/players.pdf", matches)
+
+    def _get_outlier_position_maps(self):
+        """Return the players.pdf pages that are outliers relative to the player's main-position KPI z-scores.
+
+        For the player's main position, compute per-KPI z-scores using the distribution
+        of that KPI across all matches for the same position. For each match of the
+        player in the main position compute the average (signed) z-score across KPIs.
+        Select matches where the average z-score is >= mean+std or <= mean-std (over
+        the player's main-position matches). Return up to 3 pages (fill up to 3 if
+        fewer than threshold-selected matches exist).
+        """
+        player_df = self.stats.df[self.stats.df["player_name"] == self.player_name].copy()
+        if player_df.empty:
+            return f"No position map pages found for {self.player_name}."
+
+        main_position = self.positions[0]
+        main_rows = player_df[player_df[self.stats.pos_col] == main_position].copy()
+        if main_rows.empty:
+            return (
+                f"No main-position profile data found for {self.player_name} as a {main_position}."
+            )
+
+        # Determine KPI columns
+        if not hasattr(self.stats, "kpi_columns") or not self.stats.kpi_columns:
+            return (
+                "KPI columns are not configured for outlier detection."
+            )
+
+        kpi_cols = [c for c in self.stats.kpi_columns if c in self.stats.df.columns]
+        if not kpi_cols:
+            return "No KPI columns available in the dataset for outlier detection."
+
+        # All matches for the main position (peers) used to compute KPI means/stds
+        all_pos_players = self.stats.get_main_position_data(main_position)
+        if all_pos_players.empty:
+            return f"No peer data available for position {main_position}."
+
+        # Compute per-KPI mean and std over peers
+        kpi_means = {}
+        kpi_stds = {}
+        for kpi in kpi_cols:
+            vals = all_pos_players[kpi].dropna().astype(float)
+            if vals.empty:
+                kpi_means[kpi] = np.nan
+                kpi_stds[kpi] = np.nan
+            else:
+                kpi_means[kpi] = float(vals.mean())
+                kpi_stds[kpi] = float(vals.std(ddof=0))
+
+        # For each player's main-position match, compute per-KPI z and average z
+        row_scores = []
+        for row_index, row in main_rows.iterrows():
+            z_values = []
+            for kpi in kpi_cols:
+                val = row.get(kpi, np.nan)
+                if pd.isna(val) or pd.isna(kpi_means.get(kpi)) or pd.isna(kpi_stds.get(kpi)):
+                    # skip KPI if missing or not computable
+                    continue
+                std = kpi_stds[kpi]
+                if std == 0:
+                    # avoid division by zero
+                    z = 0.0
+                else:
+                    z = (float(val) - kpi_means[kpi]) / std
+                z_values.append(z)
+
+            if not z_values:
+                avg_z = 0.0
+            else:
+                avg_z = float(np.mean(z_values))
+
+            row_scores.append(
+                {
+                    "row_index": row_index,
+                    "match_date": pd.to_datetime(row["match_date"]).date(),
+                    "average_z": avg_z,
+                }
+            )
+
+        if not row_scores:
+            return (
+                f"No outlier position map pages found for {self.player_name} as a {main_position}."
+            )
+
+        avg_z_vals = np.array([r["average_z"] for r in row_scores], dtype=float)
+        mean_avg = float(np.mean(avg_z_vals))
+        std_avg = float(np.std(avg_z_vals, ddof=0))
+
+        # Select rows above mean+std only
+        threshold_selected = [r for r in row_scores if r["average_z"] >= mean_avg + std_avg]
+
+        # If more than 3, pick those with largest positive deviation from the mean
+        if len(threshold_selected) > 3:
+            threshold_selected = sorted(
+                threshold_selected, key=lambda item: (item["average_z"] - mean_avg), reverse=True
+            )[:3]
+
+        # If fewer than 3, fill up with rows having the largest positive deviation
+        if len(threshold_selected) < 3:
+            ranked_rows = sorted(row_scores, key=lambda item: (item["average_z"] - mean_avg), reverse=True)
+            selected_indexes = {r["row_index"] for r in threshold_selected}
+            for r in ranked_rows:
+                if r["row_index"] in selected_indexes:
+                    continue
+                threshold_selected.append(r)
+                selected_indexes.add(r["row_index"])
+                if len(selected_indexes) >= 3:
+                    break
+
+        # Resolve PDF pages by date and ensure the page corresponds to the main position
+        pages_by_date = {}
+        doc = fitz.open("data/position_maps/players.pdf")
+        try:
+            for page_number, page in enumerate(doc, start=1):
+                text = page.get_text("text") or ""
+                normalized_text = text.casefold()
+
+                player_name = self.player_name.casefold().strip()
+                if player_name not in normalized_text:
+                    continue
+
+                skillcorner_match = re.search(
+                    r"skillcorner\s*[:\-]\s*([A-Z]{1,4})",
+                    text,
+                    flags=re.IGNORECASE,
+                )
+                if skillcorner_match is None:
+                    skillcorner_match = re.search(
+                        r"skillcorner\s*position\s*[:\-]\s*([A-Z]{1,4})",
+                        text,
+                        flags=re.IGNORECASE,
+                    )
+
+                if skillcorner_match is None:
+                    continue
+
+                if skillcorner_match.group(1).strip().casefold() != main_position.casefold():
+                    continue
+
+                date_match = re.search(r"\b\d{4}-\d{2}-\d{2}\b", text)
+                if date_match is None:
+                    continue
+
+                # Render page image once (lower DPI) and store bytes to avoid a second render pass
+                try:
+                    pix = page.get_pixmap(dpi=72)
+                    img_bytes = pix.tobytes("png")
+                except Exception:
+                    img_bytes = None
+
+                pages_by_date.setdefault(date_match.group(0), []).append({
+                    "page_number": page_number,
+                    "img_bytes": img_bytes,
+                })
+        finally:
+            doc.close()
+
+        matches = []
+        for item in threshold_selected:
+            date_key = item["match_date"].isoformat()
+            page_items = pages_by_date.get(date_key, [])
+            for p in page_items:
+                matches.append({
+                    "page_number": p["page_number"],
+                    "match_date": item["match_date"],
+                    "average_z": item.get("average_z", 0.0),
+                    "img_bytes": p.get("img_bytes"),
+                })
+
+        # Sort matches by outlier strength (absolute deviation from mean) descending,
+        # then by match_date and page_number for stable ordering.
+        matches_sorted = sorted(
+            matches,
+            key=lambda item: (
+                -(item.get("average_z", 0.0) - mean_avg),
+                item["match_date"],
+                item["page_number"],
+            ),
+        )
+
+        unique_matches = []
+        seen_pages = set()
+        for match in matches_sorted:
+            if match["page_number"] in seen_pages:
+                continue
+            seen_pages.add(match["page_number"])
+            unique_matches.append({
+                "page_number": match["page_number"],
+                "match_date": match["match_date"],
+                "img_bytes": match.get("img_bytes"),
+            })
+
+        return PositionMapPages("data/position_maps/players.pdf", unique_matches)
+
     def get_input(self):
         """Get input from streamlit."""
         if x := st.chat_input(
@@ -1212,6 +1520,8 @@ class PositionVersatilityChat(Chat):
                     "- If the user asks for different or contrasting players, use get_most_different_players. "
                     "- If the user asks you to summarize or extract specific information from the player data, use query_summary. "
                     "- If the user asks for players matching specific profiles, use search_profile. "
+                    "- If the user asks which position maps stand out, are different from the others, most different, or asks for outliers, use get_outlier_position_maps and render up to three outlier pages in ascending match-date order unless the user asks for a different number. "
+                    "- If the user asks to return his position maps or all position maps for the player from players.pdf, use get_position_maps and render the matching pages in ascending match-date order. "
                     "- If the user asks for general football knowledge or definitions, use search_football_knowledge. "
                     "All user messages will be prefixed with 'User:' and enclosed with ```."
                 ),
@@ -1294,6 +1604,14 @@ class PositionVersatilityChat(Chat):
             elif fc.name == "query_summary":
                 question = json.loads(fc.arguments)["question"]
                 result = self._query_summary(question)
+            elif fc.name == "get_position_maps":
+                result = self._get_position_maps()
+                self.messages_to_display.append({"role": "assistant", "content": result})
+                return
+            elif fc.name == "get_outlier_position_maps":
+                result = self._get_outlier_position_maps()
+                self.messages_to_display.append({"role": "assistant", "content": result})
+                return
             else:  # search_football_knowledge
                 query = json.loads(fc.arguments)["query"]
                 result = self._search_knowledge(query)
